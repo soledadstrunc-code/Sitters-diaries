@@ -1,0 +1,376 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<title>Provider Lifecycle Study — Sitter Team Dashboard</title>
+<style>
+  :root { color-scheme: light; }
+  * { box-sizing: border-box; }
+  body {
+    margin: 0; padding: 0; background: #F7F8FA; color: #1F2430;
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+  }
+  #app { max-width: 1080px; margin: 0 auto; padding: 28px 24px 60px; }
+
+  .topbar {
+    display: flex; justify-content: space-between; align-items: flex-start;
+    margin-bottom: 22px; gap: 16px; flex-wrap: wrap;
+  }
+  .topbar h1 { font-size: 20px; margin: 0 0 4px; color: #12203D; }
+  .topbar .sub { font-size: 13px; color: #6B7280; max-width: 560px; line-height: 1.5; }
+  .snapshot-tag {
+    font-size: 11px; background: #FFF4E5; color: #92600A; border: 1px solid #F3D9A8;
+    padding: 5px 10px; border-radius: 6px; white-space: nowrap;
+  }
+
+  .bar { display: flex; gap: 10px; align-items: center; margin-bottom: 18px; flex-wrap: wrap; }
+  .search {
+    flex: 1; min-width: 180px; padding: 9px 12px; border: 1px solid #DADDE3; border-radius: 8px;
+    font-size: 13px; background: #fff;
+  }
+  .seg-filters { display: flex; gap: 6px; }
+  .seg-btn {
+    padding: 8px 14px; border-radius: 999px; border: 1px solid #DADDE3; background: #fff;
+    font-size: 12.5px; font-weight: 600; cursor: pointer; color: #4B5565;
+  }
+  .seg-btn.active { background: #12203D; border-color: #12203D; color: #fff; }
+
+  .grid {
+    display: grid; grid-template-columns: repeat(auto-fill, minmax(220px, 1fr)); gap: 12px;
+  }
+  .card {
+    background: #fff; border: 1px solid #E7E9ED; border-radius: 12px; padding: 14px 16px;
+    cursor: pointer; transition: box-shadow .12s, transform .12s;
+  }
+  .card:hover { box-shadow: 0 4px 14px rgba(20,30,60,0.08); transform: translateY(-1px); }
+  .card-top { display: flex; justify-content: space-between; align-items: flex-start; margin-bottom: 8px; }
+  .card-name { font-size: 15px; font-weight: 700; color: #12203D; }
+  .badge { font-size: 10px; font-weight: 700; padding: 3px 8px; border-radius: 6px; letter-spacing: .03em; }
+  .badge.TOP { background: #E9F6EC; color: #1E7A34; }
+  .badge.MID { background: #EAF1FF; color: #2455C4; }
+  .badge.NEW { background: #F3EEFB; color: #6B3FBF; }
+  .status-row { display: flex; align-items: center; gap: 6px; font-size: 12px; color: #6B7280; }
+  .dot { width: 7px; height: 7px; border-radius: 50%; display: inline-block; }
+  .dot.complete { background: #2FA84F; }
+  .dot.pending { background: #C9CDD6; }
+  .dot.demo { background: #E08A00; }
+
+  .backbtn {
+    background: none; border: none; color: #2455C4; font-size: 13px; font-weight: 600;
+    cursor: pointer; padding: 0; margin-bottom: 14px; display: inline-flex; align-items: center; gap: 4px;
+  }
+
+  .profile-head {
+    background: #fff; border: 1px solid #E7E9ED; border-radius: 12px; padding: 18px 20px; margin-bottom: 16px;
+  }
+  .profile-head-top { display: flex; justify-content: space-between; align-items: flex-start; gap: 12px; flex-wrap: wrap; }
+  .profile-head h2 { margin: 0 0 4px; font-size: 20px; color: #12203D; }
+  .meta-line { font-size: 12.5px; color: #6B7280; }
+  .demo-banner {
+    background: #FFF4E5; border: 1px solid #F3D9A8; color: #92600A; font-size: 12px;
+    padding: 8px 12px; border-radius: 8px; margin-top: 10px; font-weight: 600;
+  }
+  .pending-banner {
+    background: #F4F5F7; border: 1px solid #E3E5EA; color: #565F6E; font-size: 13px;
+    padding: 16px; border-radius: 10px; line-height: 1.6;
+  }
+  .tabbtns { display: flex; gap: 8px; margin-top: 12px; }
+  .tabbtn {
+    padding: 7px 14px; border-radius: 8px; border: 1px solid #DADDE3; background: #fff;
+    font-size: 12.5px; font-weight: 600; cursor: pointer; color: #4B5565;
+  }
+  .tabbtn.active { background: #12203D; color: #fff; border-color: #12203D; }
+
+  .section {
+    background: #fff; border: 1px solid #E7E9ED; border-radius: 12px; padding: 16px 20px; margin-bottom: 12px;
+  }
+  .section h3 { margin: 0 0 10px; font-size: 14px; color: #12203D; }
+  .section ul { margin: 0; padding-left: 18px; }
+  .section li { font-size: 13px; margin-bottom: 5px; line-height: 1.5; color: #333; }
+  .section p { font-size: 13px; line-height: 1.6; color: #333; margin: 0; }
+  .tag-pill {
+    display: inline-block; font-size: 10.5px; background: #F1F3F6; color: #4B5565;
+    padding: 2px 7px; border-radius: 5px; margin-right: 4px; font-weight: 600;
+  }
+  .quote { font-size: 13px; font-style: italic; color: #333; border-left: 3px solid #DADDE3; padding-left: 10px; margin-bottom: 8px; }
+
+  .stage-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(220px,1fr)); gap: 10px; }
+  .stage-card { background: #FAFBFC; border: 1px solid #ECEEF1; border-radius: 8px; padding: 10px 12px; }
+  .stage-card h4 { margin: 0 0 6px; font-size: 12.5px; color: #12203D; }
+  .stage-card div { font-size: 12px; color: #444; margin-bottom: 3px; }
+  .stage-card b { color: #6B7280; font-weight: 600; }
+
+  table.activity { width: 100%; border-collapse: collapse; font-size: 12.5px; }
+  table.activity th { text-align: left; color: #6B7280; font-weight: 600; padding: 8px 10px; border-bottom: 1px solid #E7E9ED; }
+  table.activity td { padding: 8px 10px; border-bottom: 1px solid #F1F3F6; color: #333; }
+  .empty-state { text-align: center; padding: 40px 20px; color: #8A93A3; font-size: 13px; line-height: 1.6; }
+  .empty-state .big { font-size: 28px; margin-bottom: 8px; }
+
+  footer.note { margin-top: 24px; font-size: 11px; color: #A2A9B4; text-align: center; }
+</style>
+</head>
+<body>
+<div id="app"></div>
+
+<script>
+/* ---------------- DATA ----------------
+   Static snapshot embedded at build time. No live connector: user names/segments come from
+   "Users & segments.xlsx"; profile content comes from analyzed interview transcripts (once available);
+   activity comes from the "Entries" tab of Rover_Diary_Study_Tool.xlsx, which is fed from MyInsights
+   once the diary study is live. Ask your researcher to refresh this view as new data lands.
+------------------------------------------ */
+
+const USERS = [
+  {name:"Megan", segment:"MID"}, {name:"Colin", segment:"TOP"}, {name:"Naomi", segment:"TOP"},
+  {name:"Bruna", segment:"TOP"}, {name:"Amy", segment:"TOP"}, {name:"Joey", segment:"MID"},
+  {name:"Cate", segment:"MID"}, {name:"Emma", segment:"MID"}, {name:"Kristin", segment:"TOP"},
+  {name:"Erica", segment:"MID"}, {name:"Caroline", segment:"MID"}, {name:"Desiree", segment:"NEW"},
+  {name:"Melissa", segment:"MID"}, {name:"Becky", segment:"TOP"}, {name:"Dawn", segment:"TOP"},
+  {name:"Vanessa", segment:"NEW"}, {name:"Anita", segment:"TOP"}, {name:"David", segment:"NEW"},
+  {name:"Shania", segment:"TOP"}, {name:"Erika", segment:"TOP"}, {name:"Cameron", segment:"MID"},
+  {name:"Tifany", segment:"TOP"}, {name:"Deborah", segment:"NEW"}, {name:"Kevin", segment:"NEW"},
+  {name:"Richard", segment:"MID"}, {name:"Alexandra", segment:"NEW"}, {name:"Ashley", segment:"NEW"},
+  {name:"Jillian", segment:"NEW"}, {name:"Christianna", segment:"MID"}, {name:"Emily", segment:"NEW"},
+  {name:"Andrew", segment:"TOP"}, {name:"Julia", segment:"NEW"}, {name:"Alyssa", segment:"NEW"},
+  {name:'Tianrui "TR"', segment:"TOP"}, {name:"Annabelle", segment:"NEW"}, {name:"Rachel", segment:"NEW"}
+];
+
+// Illustrative sample profiles ONLY — not real interview data. Shown so the sitters team can see
+// what the finished view will look like. Replace via the researcher's analysis pipeline.
+const SAMPLE_PROFILES = {
+  "Colin": {
+    demo: true,
+    tenure: "3.5 years", interviewDate: "sample",
+    snapshot: "Colin runs pet sitting as his main income, mostly repeat clients built up over three years. Rover still handles discovery for new clients, but nearly all day-to-day coordination with regulars happens over text and a shared Google Calendar.",
+    motivations: ["Built the business to have full control over his schedule and income", "Genuinely enjoys long-term relationships with the same dogs and owners"],
+    needs: [["Client history","Wants one place to see a repeat client's past bookings, notes, and preferences"], ["Payment clarity","Wants predictable payout timing to plan cash flow"]],
+    frustrations: [["Switching tools","Re-enters the same client details in Rover, his calendar, and a notes app"], ["Communication gap","Feels Rover messaging is fine for new clients but clunky for ongoing back-and-forth"]],
+    stages: {
+      B: {client:"Wants fast response and reassurance", provider:"Wants context on the dog before committing", channel:"Rover for new leads, text for repeats", tools:"Rover inbox, iMessage"},
+      D: {client:"Clear price and dates", provider:"Wants booking terms locked before confirming", channel:"Rover for new, text for repeats", tools:"Rover booking flow"},
+      S: {client:"Photo/video updates", provider:"Wants an easy way to log updates without opening the app each time", channel:"Text, Rover Cards for new clients", tools:"Rover Cards, iMessage, Camera roll"},
+      A: {client:"Quick recap and next-booking nudge", provider:"Wants a lightweight way to rebook without renegotiating from scratch", channel:"Text", tools:"Google Calendar, iMessage"}
+    },
+    ecosystem: [["Google Calendar","Manages full schedule across Rover + private clients","Rover has no unified calendar view across both"], ["iMessage","Primary channel with repeat clients","Faster and more personal than in-app messaging"]],
+    futurePlans: ["Wants to grow to 2-3 sittings/day consistently without adding platforms", "Open to a small assistant/backup sitter eventually"],
+    leakage: [["Scheduling","Moved to Google Calendar once repeat client volume passed ~10/month","Signal: Professionalization"], ["Client notes","Kept in a personal notes app since Rover doesn't retain history well across bookings","Signal: Platform dependence risk"]],
+    quotes: ["“Once I know a client, Rover kind of gets in the way — I just want to text them.”", "“I'd pay for a better way to see everyone's history in one place.”"],
+    platformRole: "Helpful for acquisition and trust, but increasingly optional for day-to-day management of repeat clients."
+  },
+  "Megan": {
+    demo: true,
+    tenure: "14 months", interviewDate: "sample",
+    snapshot: "Megan is transitioning from mostly new clients to a growing repeat base. She still relies on Rover for nearly everything but is starting to feel the seams around managing multiple ongoing relationships.",
+    motivations: ["Loves the flexibility to sit around a part-time job", "Motivated by building a trusted local reputation"],
+    needs: [["Organization","Wants a simple way to track which regulars need re-booking"], ["Guidance","Wants tips on how experienced sitters manage growing client lists"]],
+    frustrations: [["Manual work","Manually checks in with each repeat client instead of anything automated"], ["Missing information","Sometimes forgets a dog's specific needs between bookings"]],
+    stages: {
+      B: {client:"Wants to know availability quickly", provider:"Wants clear expectations upfront", channel:"Rover", tools:"Rover inbox"},
+      D: {client:"Simple confirmation", provider:"Wants booking details in one place", channel:"Rover", tools:"Rover booking flow"},
+      S: {client:"Frequent updates", provider:"Wants reminders of past notes", channel:"Rover Cards", tools:"Rover Cards"},
+      A: {client:"Friendly wrap-up", provider:"Wants an easy nudge to rebook", channel:"Rover messaging", tools:"Rover messaging"}
+    },
+    ecosystem: [["Notes app","Jots down dog preferences she's afraid of forgetting","Rover doesn't surface past notes prominently enough"]],
+    futurePlans: ["Wants to shift to mostly repeat clients within a year", "Considering raising rates as she becomes more established"],
+    leakage: [["Client notes","Started keeping her own notes after mixing up two dogs' feeding schedules","Signal: Growing loyalty, but early platform dependence risk"]],
+    quotes: ["“I want to get to the point where I'm not chasing new clients every week.”"],
+    platformRole: "Essential today — still the center of gravity for both acquisition and management."
+  },
+  "Desiree": {
+    demo: true,
+    tenure: "2 months", interviewDate: "sample",
+    snapshot: "Desiree just started on Rover and is entirely focused on getting her first steady clients. Everything currently happens inside the platform.",
+    motivations: ["Wanted flexible income around caring for her own pets", "Drawn to the idea of working outdoors with animals"],
+    needs: [["Guidance","Wants more onboarding on how to write a strong profile"], ["Better visibility","Wants to understand why some listings get more views"]],
+    frustrations: [["Lack of context","Unsure how pricing should compare to more established sitters nearby"]],
+    stages: {
+      B: {client:"Wants reassurance from a new sitter", provider:"Wants clear guidance on what to say", channel:"Rover", tools:"Rover inbox"},
+      D: {client:"Straightforward booking", provider:"Wants confidence she's pricing correctly", channel:"Rover", tools:"Rover booking flow"},
+      S: {client:"Reassurance during first sitting", provider:"Wants a checklist so she doesn't miss anything", channel:"Rover Cards", tools:"Rover Cards"},
+      A: {client:"A review", provider:"Wants to know how to ask for repeat business", channel:"Rover messaging", tools:"Rover messaging"}
+    },
+    ecosystem: [],
+    futurePlans: ["Hopes to build a small base of repeat clients within 6 months"],
+    leakage: [],
+    quotes: ["“Right now Rover is basically my whole business — I don't know enough yet to need anything else.”"],
+    platformRole: "Essential — full acquisition, trust, and workflow infrastructure at this stage."
+  }
+};
+
+// Illustrative sample activity — from the Entries tab structure, not real MyInsights data.
+const SAMPLE_ACTIVITY = {
+  "Colin": [
+    {date:"2026-06-03", workflowArea:"Relationship management", tool:"iMessage", platformRole:"Barrier", need:"Client history", friction:"Switching tools", emotion:"Frustrated", desc:"Re-explained a repeat client's dog's routine after losing track outside Rover."},
+    {date:"2026-06-10", workflowArea:"Scheduling", tool:"Google Calendar", platformRole:"Irrelevant", signal:"Platform independence", emotion:"Confident", desc:"Booked 3 repeat sittings directly via calendar invite, no Rover booking flow used."},
+    {date:"2026-06-18", workflowArea:"Client acquisition", tool:"Rover", platformRole:"Essential", signal:"Growing loyalty", emotion:"Satisfied", desc:"New client inquiry came through Rover search."}
+  ],
+  "Megan": [
+    {date:"2026-06-05", workflowArea:"Communication", tool:"Rover", platformRole:"Helpful", need:"Organization", emotion:"Uncertain", desc:"Manually messaged 4 repeat clients to check on rebooking."},
+  ],
+  "Desiree": [
+    {date:"2026-06-01", workflowArea:"Client acquisition", tool:"Rover", platformRole:"Essential", emotion:"Excited", desc:"Received first booking inquiry."}
+  ]
+};
+
+let state = { view: "dash", segFilter: "ALL", search: "", currentUser: null, profileTab: "profile" };
+
+function statusOf(name){
+  if (SAMPLE_PROFILES[name]) return "demo";
+  return "pending";
+}
+
+function render(){
+  const app = document.getElementById("app");
+  if (state.view === "dash") app.innerHTML = renderDash();
+  else if (state.view === "profile") app.innerHTML = renderProfilePage();
+  attachHandlers();
+}
+
+function renderDash(){
+  const filtered = USERS.filter(u => {
+    const segOk = state.segFilter === "ALL" || u.segment === state.segFilter;
+    const searchOk = u.name.toLowerCase().includes(state.search.toLowerCase());
+    return segOk && searchOk;
+  });
+  const segCounts = { ALL: USERS.length, NEW: USERS.filter(u=>u.segment==="NEW").length,
+    MID: USERS.filter(u=>u.segment==="MID").length, TOP: USERS.filter(u=>u.segment==="TOP").length };
+
+  return `
+    <div class="topbar">
+      <div>
+        <h1>Provider Lifecycle Study — Sitter Profiles</h1>
+        <div class="sub">36 providers, initial interviews in progress. Click a card to see their profile — needs, motivations, frustrations, future plans — and their activity feed once the diary study begins.</div>
+      </div>
+      <div class="snapshot-tag">⚠ Static snapshot — 3 sample profiles shown for illustration, 33 awaiting interview analysis</div>
+    </div>
+    <div class="bar">
+      <input class="search" placeholder="Search by name..." value="${state.search}" oninput="window.__search(this.value)">
+      <div class="seg-filters">
+        ${["ALL","NEW","MID","TOP"].map(s=>`<button class="seg-btn ${state.segFilter===s?'active':''}" data-seg="${s}">${s} (${segCounts[s]})</button>`).join("")}
+      </div>
+    </div>
+    <div class="grid">
+      ${filtered.map(u=>{
+        const st = statusOf(u.name);
+        const statusLabel = st === "demo" ? "Sample profile" : "Interview pending";
+        const dotClass = st === "demo" ? "demo" : "pending";
+        return `<div class="card" data-user="${u.name}">
+          <div class="card-top">
+            <div class="card-name">${u.name}</div>
+            <div class="badge ${u.segment}">${u.segment}</div>
+          </div>
+          <div class="status-row"><span class="dot ${dotClass}"></span>${statusLabel}</div>
+        </div>`;
+      }).join("")}
+    </div>
+    <footer class="note">Users & segments sourced from "Users & segments.xlsx". Profiles built from analyzed interview transcripts against the study's tag taxonomy. Activity sourced from the Entries tab of the Diary Study Tool, fed by MyInsights.</footer>
+  `;
+}
+
+function renderProfilePage(){
+  const name = state.currentUser;
+  const u = USERS.find(x=>x.name===name);
+  const profile = SAMPLE_PROFILES[name];
+  const activity = SAMPLE_ACTIVITY[name] || [];
+
+  let body = "";
+  if (state.profileTab === "profile") {
+    if (!profile) {
+      body = `<div class="pending-banner">
+        <b>Interview not yet analyzed.</b><br>
+        Once ${name}'s interview transcript is uploaded and coded, this page will show their snapshot, motivations, needs, frustrations, booking journey, ecosystem, future plans, and off-platform leakage signals.
+      </div>`;
+    } else {
+      body = `
+        ${profile.demo ? `<div class="demo-banner">⚠ Sample profile for illustration only — not from a real interview.</div>` : ""}
+        <div class="section"><h3>Snapshot</h3><p>${profile.snapshot}</p></div>
+        <div class="section"><h3>Motivations</h3><ul>${profile.motivations.map(m=>`<li>${m}</li>`).join("")}</ul></div>
+        <div class="section"><h3>Needs</h3><ul>${profile.needs.map(([tag,d])=>`<li><span class="tag-pill">${tag}</span>${d}</li>`).join("")}</ul></div>
+        <div class="section"><h3>Frustrations</h3><ul>${profile.frustrations.map(([tag,d])=>`<li><span class="tag-pill">${tag}</span>${d}</li>`).join("")}</ul></div>
+        <div class="section">
+          <h3>Booking Journey</h3>
+          <div class="stage-grid">
+            ${["B","D","S","A"].map(k=>{
+              const label = {B:"Before booking", D:"Decision", S:"Sitting", A:"After sitting"}[k];
+              const s = profile.stages[k];
+              return `<div class="stage-card"><h4>${label}</h4>
+                <div><b>Client:</b> ${s.client}</div>
+                <div><b>Provider:</b> ${s.provider}</div>
+                <div><b>Channel:</b> ${s.channel}</div>
+                <div><b>Tools:</b> ${s.tools}</div>
+              </div>`;
+            }).join("")}
+          </div>
+        </div>
+        ${profile.ecosystem.length ? `<div class="section"><h3>Ecosystem — Tools Alongside Rover</h3><ul>${profile.ecosystem.map(([t,role,why])=>`<li><b>${t}</b> — ${role} <i>(${why})</i></li>`).join("")}</ul></div>` : ""}
+        <div class="section"><h3>Future Plans</h3><ul>${profile.futurePlans.map(p=>`<li>${p}</li>`).join("")}</ul></div>
+        ${profile.leakage.length ? `<div class="section"><h3>Off-Platform Leakage Signals</h3><ul>${profile.leakage.map(([w,trig,sig])=>`<li><b>${w}</b> — ${trig} <span class="tag-pill">${sig}</span></li>`).join("")}</ul></div>` : ""}
+        <div class="section"><h3>Representative Quotes</h3>${profile.quotes.map(q=>`<div class="quote">${q}</div>`).join("")}</div>
+        <div class="section"><h3>Platform Role Assessment</h3><p>${profile.platformRole}</p></div>
+      `;
+    }
+  } else {
+    // activity tab
+    if (!activity.length) {
+      body = `<div class="section"><div class="empty-state"><div class="big">📭</div>No diary activity logged yet.<br>This will populate automatically from MyInsights once the diary study begins for ${name}.</div></div>`;
+    } else {
+      body = `
+        ${profile && profile.demo ? `<div class="demo-banner">⚠ Sample activity for illustration only — not real MyInsights data.</div>` : ""}
+        <div class="section">
+          <h3>Activity Feed</h3>
+          <table class="activity">
+            <thead><tr><th>Date</th><th>Workflow Area</th><th>Tool</th><th>Platform Role</th><th>Emotion</th><th>Description</th></tr></thead>
+            <tbody>
+              ${activity.map(a=>`<tr><td>${a.date}</td><td>${a.workflowArea}</td><td>${a.tool}</td><td>${a.platformRole}</td><td>${a.emotion||""}</td><td>${a.desc}</td></tr>`).join("")}
+            </tbody>
+          </table>
+        </div>`;
+    }
+  }
+
+  return `
+    <button class="backbtn" data-back="dash">← All providers</button>
+    <div class="profile-head">
+      <div class="profile-head-top">
+        <div>
+          <h2>${name}</h2>
+          <div class="meta-line">Segment: <b>${u.segment}</b>${profile ? ` · Tenure: ${profile.tenure}` : ""}</div>
+        </div>
+        <div class="badge ${u.segment}">${u.segment}</div>
+      </div>
+      <div class="tabbtns">
+        <button class="tabbtn ${state.profileTab==='profile'?'active':''}" data-tab="profile">Profiling</button>
+        <button class="tabbtn ${state.profileTab==='activity'?'active':''}" data-tab="activity">Activity</button>
+      </div>
+    </div>
+    ${body}
+  `;
+}
+
+function attachHandlers(){
+  document.querySelectorAll("[data-user]").forEach(el=>{
+    el.addEventListener("click", ()=>{
+      state.view = "profile"; state.currentUser = el.getAttribute("data-user"); state.profileTab = "profile";
+      render();
+    });
+  });
+  document.querySelectorAll("[data-seg]").forEach(el=>{
+    el.addEventListener("click", ()=>{ state.segFilter = el.getAttribute("data-seg"); render(); });
+  });
+  document.querySelectorAll("[data-back]").forEach(el=>{
+    el.addEventListener("click", ()=>{ state.view = "dash"; render(); });
+  });
+  document.querySelectorAll("[data-tab]").forEach(el=>{
+    el.addEventListener("click", ()=>{ state.profileTab = el.getAttribute("data-tab"); render(); });
+  });
+}
+
+window.__search = function(v){ state.search = v; render();
+  // restore focus + cursor to the search box after re-render
+  requestAnimationFrame(()=>{ const el=document.querySelector(".search"); if(el){ el.focus(); el.setSelectionRange(v.length,v.length); } });
+};
+
+render();
+</script>
+</body>
+</html>
