@@ -16,18 +16,23 @@ CORE_FIELDS = {"date", "user name", "segment", "week #"}
 
 # ---------------- AUTH ----------------
 def check_login(email, password):
-    creds = st.secrets.get("auth", {})
-    stored_hash = creds.get(email.strip().lower())
-    if not stored_hash:
+    auth_cfg = st.secrets.get("auth", {})
+    allowed_domain = auth_cfg.get("allowed_domain", "").strip().lower()
+    shared_hash = auth_cfg.get("shared_password_hash", "")
+
+    email = email.strip().lower()
+    if not allowed_domain or not shared_hash:
         return False
-    return hashlib.sha256(password.encode()).hexdigest() == stored_hash
+    if not email.endswith("@" + allowed_domain):
+        return False
+    return hashlib.sha256(password.encode()).hexdigest() == shared_hash
 
 
 def render_login():
     st.title("Provider Lifecycle Study — Sitter Profiles")
     st.caption("Sign in with your Rover email to view the diary study dashboard.")
     with st.form("login_form"):
-        email = st.text_input("Email")
+        email = st.text_input("Email", placeholder="you@rover.com")
         password = st.text_input("Password", type="password")
         submitted = st.form_submit_button("Log in")
     if submitted:
@@ -36,7 +41,7 @@ def render_login():
             st.session_state.user_email = email.strip().lower()
             st.rerun()
         else:
-            st.error("Incorrect email or password.")
+            st.error("Incorrect email or password, or your email isn't a Rover address.")
 
 
 def render_logout_button():
