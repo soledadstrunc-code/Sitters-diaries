@@ -41,7 +41,19 @@ CORE_FIELDS = {"date", "user name", "segment", "week #"}
 # than hardcode one category list, load_coded_interview reads whatever category
 # rows are actually present in each participant's own Coding sheet.
 
-KICKOFF_DIR = Path(__file__).resolve().parent.parent / "Kick off interviews"
+def _kickoff_dir():
+    """Locally (Drive-synced Mac folder), provider subfolders live inside a 'Kick
+    off interviews' folder sibling to this app. On the deployed GitHub repo, that
+    wrapper folder doesn't exist — the provider subfolders were uploaded directly
+    at the repo root instead. Support both without requiring either layout to
+    change: use the 'Kick off interviews' folder if it's there, else fall back to
+    this app's parent folder itself."""
+    parent = Path(__file__).resolve().parent.parent
+    candidate = parent / "Kick off interviews"
+    return candidate if candidate.exists() else parent
+
+
+KICKOFF_DIR = _kickoff_dir()
 
 
 def _providers_dir():
