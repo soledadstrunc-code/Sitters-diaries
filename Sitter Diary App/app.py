@@ -71,6 +71,19 @@ NAME_ALIASES = {"Amy": "Ami"}
 _ALIAS_TO_CANONICAL = {alias.lower(): canonical for canonical, alias in NAME_ALIASES.items()}
 
 
+def _first_word(s):
+    """First whitespace-separated token of a name string, e.g. 'Ashley P' ->
+    'Ashley'. Used to normalize both folder-derived names and the Entries
+    sheet's 'User Name' values to the same matching key, so a sheet value
+    like 'Ashley P' (used to disambiguate two same-first-name providers)
+    still matches a folder that's just 'Ashley - Top Provider' — combined
+    with segment (see build_participants/load_user_roster), this is what
+    keeps two same-first-name providers from getting merged onto one card,
+    without requiring any folder rename."""
+    s = (s or "").strip()
+    return s.split()[0] if s else ""
+
+
 def _segment_from_folder_name(folder_name):
     """Provider folder names look like '<Name> - New Provider' / '... - Pro Provider'
     / '... - Mid Provider' (with occasional 'Prodiver' typos and inconsistent spacing
@@ -83,12 +96,14 @@ def _segment_from_folder_name(folder_name):
     return SEGMENT_LABELS.get(seg_word, "NEW")
 
 
-def _find_coded_workbook_path(name):
+def _find_coded_workbook_path(name, segment=None):
     """Looks for <alias>_Coded.xlsx inside a per-provider subfolder of the local
     'Kick off interviews' folder (or its 'Users' subfolder, see _providers_dir).
     Folder names look like '<Name> - New Provider', so this matches on the leading
     name segment, case-insensitively, trying both the sheet's name and any known
-    alias for it."""
+    alias for it. When two providers share a first name (e.g. two 'Ashley'
+    folders, one New one Pro), `segment` disambiguates which folder is meant —
+    pass it whenever it's known, since name alone is ambiguous in that case."""
     providers_dir = _providers_dir()
     if not providers_dir.exists():
         return None
@@ -99,6 +114,8 @@ def _find_coded_workbook_path(name):
         folder_prefix = child.name.split("-")[0].strip().lower()
         if folder_prefix not in candidates:
             continue
+        if segment is not None and _segment_from_folder_name(child.name) != segment:
+            continue
         matches = list(child.glob("*_Coded.xlsx"))
         if matches:
             return matches[0]
@@ -106,18 +123,20 @@ def _find_coded_workbook_path(name):
 
 
 @st.cache_data(ttl=300, show_spinner=False)
-def load_snapshot(name):
+def load_snapshot(name, segment=None):
     """Reads a participant's <Name>_Coded.xlsx 'Snapshot' sheet: a Field / Value /
     Supporting quote table capturing their segment, experience on Rover, income
     role, client counts, service types, growth intention, and other context.
     Returns None if there's no coded workbook yet, or it has no Snapshot sheet.
     Reads the local file when 'Kick off interviews' exists on disk, else falls
-    back to the same file live from Drive (see _find_drive_coded_workbook_bytes)."""
-    path = _find_coded_workbook_path(name)
+    back to the same file live from Drive (see _find_drive_coded_workbook_bytes).
+    Pass `segment` whenever known — it's what disambiguates two providers who
+    share the same first name (see _find_coded_workbook_path)."""
+    path = _find_coded_workbook_path(name, segment)
     if path:
         wb = openpyxl.load_workbook(path, data_only=True)
     else:
-        data = _find_drive_coded_workbook_bytes(name)
+        data = _find_drive_coded_workbook_bytes(name, segment)
         if not data:
             return None
         wb = openpyxl.load_workbook(io.BytesIO(data), data_only=True)
@@ -242,19 +261,20 @@ def render_entries_table(rows, columns):
 
 
 @st.cache_data(ttl=300, show_spinner=False)
-def load_coded_interview(name):
+def load_coded_interview(name, segment=None):
     """Reads a participant's <Name>_Coded.xlsx 'Coding' sheet from the local 'Kick
     off interviews' folder: one row per category, in whatever category scheme that
     particular workbook uses (see the taxonomy note above — this does not assume a
     fixed list of category names, since it varies by when the transcript was coded).
     Returns None if no coded workbook exists yet for this provider, so callers can
     fall back to a pending-state message. Reads the local file when 'Kick off
-    interviews' exists on disk, else falls back to the same file live from Drive."""
-    path = _find_coded_workbook_path(name)
+    interviews' exists on disk, else falls back to the same file live from Drive.
+    Pass `segment` whenever known, to disambiguate providers sharing a first name."""
+    path = _find_coded_workbook_path(name, segment)
     if path:
         wb = openpyxl.load_workbook(path, data_only=True)
     else:
-        data = _find_drive_coded_workbook_bytes(name)
+        data = _find_drive_coded_workbook_bytes(name, segment)
         if not data:
             return None
         wb = openpyxl.load_workbook(io.BytesIO(data), data_only=True)
@@ -395,15 +415,19 @@ SCOPES = [
 ]
 
 
-@st.cache_resource(show_spinner=False)
+@st.cache_resource(show_spinner=False, ttl=120)
 def get_gspread_client():
     info = dict(st.secrets["gcp_service_account"])
     creds = Credentials.from_service_account_info(info, scopes=SCOPES)
     return gspread.authorize(creds)
 
 
-@st.cache_resource(show_spinner=False)
+@st.cache_resource(show_spinner=False, ttl=120)
 def get_drive_service():
+    """Cached for 2 minutes only (not indefinitely) — the underlying HTTP
+    connection to Google can go stale if left idle longer than that, which
+    surfaces as '[Errno 32] Broken pipe' on the next request. A short TTL
+    forces a fresh connection periodically instead of reusing a dead one."""
     info = dict(st.secrets["gcp_service_account"])
     creds = Credentials.from_service_account_info(info, scopes=SCOPES)
     return build("drive", "v3", credentials=creds)
@@ -415,15 +439,46 @@ def get_drive_service():
 # provider subfolders and *_Coded.xlsx / Pro_Segment_Patterns.xlsx files, live from
 # the "Kick off interviews" Drive folder (secrets: drive.provider_folder_id) —
 # updating a workbook in Drive is all it takes, no GitHub step, ever.
-def _drive_download_with_retry(request, max_attempts=3):
-    """Runs a Drive API media/export request through MediaIoBaseDownload's
-    chunked, retry-aware transfer, with a few outer retries on top. Streamlit
-    Cloud's outbound connection occasionally drops mid-download (surfaces as
-    '[Errno 32] Broken pipe' or similar) — this rides out that kind of
-    transient network hiccup instead of failing the whole page load."""
+def _drive_call_with_retry(build_call, max_attempts=3):
+    """Same rebuild-the-connection-between-retries strategy as
+    _drive_download_with_retry below, but for small one-shot Drive API calls
+    (e.g. a metadata .get()) rather than a chunked file download. Takes a
+    function that accepts a freshly-fetched drive `service` and returns the
+    result of calling .execute() on it."""
     last_error = None
     for attempt in range(max_attempts):
         try:
+            if attempt > 0:
+                get_drive_service.clear()
+            service = get_drive_service()
+            return build_call(service)
+        except Exception as e:
+            last_error = e
+            time.sleep(1 + attempt)
+    raise last_error
+
+
+def _drive_download_with_retry(file_id, mime_type, max_attempts=3):
+    """Runs a Drive API media/export request through MediaIoBaseDownload's
+    chunked, retry-aware transfer, with a few outer retries on top. Each retry
+    also forces get_drive_service() to rebuild from scratch (fresh connection)
+    rather than reusing whatever connection just failed — a stale/idle
+    connection to Google is the most common cause of '[Errno 32] Broken
+    pipe' errors in long-running server processes like this one, and retrying
+    on the exact same connection often just reproduces the same failure."""
+    last_error = None
+    for attempt in range(max_attempts):
+        try:
+            if attempt > 0:
+                get_drive_service.clear()
+            service = get_drive_service()
+            if mime_type == "application/vnd.google-apps.spreadsheet":
+                request = service.files().export_media(
+                    fileId=file_id,
+                    mimeType="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+                )
+            else:
+                request = service.files().get_media(fileId=file_id)
             buffer = io.BytesIO()
             downloader = MediaIoBaseDownload(buffer, request)
             done = False
@@ -437,14 +492,12 @@ def _drive_download_with_retry(request, max_attempts=3):
 
 
 def _download_drive_bytes(service, file_id, mime_type):
-    if mime_type == "application/vnd.google-apps.spreadsheet":
-        request = service.files().export_media(
-            fileId=file_id,
-            mimeType="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
-        )
-    else:
-        request = service.files().get_media(fileId=file_id)
-    return _drive_download_with_retry(request)
+    # `service` is accepted for call-site compatibility (callers already have
+    # one from an earlier metadata call), but each retry attempt below gets
+    # its own — possibly freshly rebuilt — service instance instead of
+    # reusing this one, since a stale cached connection is the likely cause
+    # of broken-pipe errors, not a one-off network blip.
+    return _drive_download_with_retry(file_id, mime_type)
 
 
 @st.cache_data(ttl=300, show_spinner=False)
@@ -472,10 +525,12 @@ def _list_drive_provider_folders():
 
 
 @st.cache_data(ttl=300, show_spinner=False)
-def _find_drive_coded_workbook_bytes(name):
+def _find_drive_coded_workbook_bytes(name, segment=None):
     """Drive equivalent of _find_coded_workbook_path: finds this provider's
     subfolder under 'Kick off interviews' in Drive, downloads whatever
-    '*_Coded.xlsx' file is inside it, and returns the raw bytes (or None)."""
+    '*_Coded.xlsx' file is inside it, and returns the raw bytes (or None).
+    Pass `segment` whenever known, to disambiguate providers sharing a first name
+    (e.g. two 'Ashley' folders, one New one Pro)."""
     root_folder_id = st.secrets.get("drive", {}).get("provider_folder_id")
     if not root_folder_id:
         return None
@@ -484,9 +539,12 @@ def _find_drive_coded_workbook_bytes(name):
     target_folder_id = None
     for f in _list_drive_provider_folders():
         prefix = f["name"].split("-")[0].strip().lower()
-        if prefix in candidates:
-            target_folder_id = f["id"]
-            break
+        if prefix not in candidates:
+            continue
+        if segment is not None and _segment_from_folder_name(f["name"]) != segment:
+            continue
+        target_folder_id = f["id"]
+        break
     if not target_folder_id:
         return None
 
@@ -515,26 +573,35 @@ def _find_drive_file_bytes_by_name(filename):
 
 
 @st.cache_data(ttl=300, show_spinner=False)
-def get_provider_description(name):
+def get_provider_description(name, segment=None):
     """Looks for a Google Doc inside this provider's Drive subfolder (under the
     'Kick off interviews' folder) and returns its text as a description. Returns
-    None if no folder / doc is found, or if the drive folder isn't configured."""
+    None if no folder / doc is found, or if the drive folder isn't configured.
+
+    Matches on the folder's leading name segment (same convention as
+    _find_coded_workbook_path), not an exact folder-name match — provider
+    folders are named like 'Colin - Pro Provider', not just 'Colin'. Pass
+    `segment` whenever known to disambiguate providers sharing a first name
+    (e.g. two 'Ashley' folders, one New one Pro)."""
     drive_cfg = st.secrets.get("drive", {})
     root_folder_id = drive_cfg.get("provider_folder_id")
     if not root_folder_id:
         return None
 
-    service = get_drive_service()
-
-    safe_name = name.replace("'", "\\'")
-    folder_query = (
-        f"'{root_folder_id}' in parents and mimeType = 'application/vnd.google-apps.folder' "
-        f"and name = '{safe_name}'"
-    )
-    folders = service.files().list(q=folder_query, fields="files(id, name)").execute().get("files", [])
-    if not folders:
+    candidates = {name.strip().lower(), NAME_ALIASES.get(name.strip(), name.strip()).lower()}
+    provider_folder_id = None
+    for f in _list_drive_provider_folders():
+        prefix = f["name"].split("-")[0].strip().lower()
+        if prefix not in candidates:
+            continue
+        if segment is not None and _segment_from_folder_name(f["name"]) != segment:
+            continue
+        provider_folder_id = f["id"]
+        break
+    if not provider_folder_id:
         return None
-    provider_folder_id = folders[0]["id"]
+
+    service = get_drive_service()
 
     doc_query = (
         f"'{provider_folder_id}' in parents and mimeType = 'application/vnd.google-apps.document' "
@@ -650,8 +717,9 @@ def _load_entries_from_google_sheets():
     parsed with openpyxl) — both are supported so this keeps working regardless
     of which kind of file ends up at that ID."""
     spreadsheet_id = st.secrets["sheet"]["spreadsheet_id"]
-    service = get_drive_service()
-    meta = service.files().get(fileId=spreadsheet_id, fields="mimeType").execute()
+    meta = _drive_call_with_retry(
+        lambda service: service.files().get(fileId=spreadsheet_id, fields="mimeType").execute()
+    )
     mime_type = meta.get("mimeType", "")
 
     if mime_type == "application/vnd.google-apps.spreadsheet":
@@ -696,6 +764,42 @@ def _load_entries_from_google_sheets():
 
 
 @st.cache_data(ttl=300, show_spinner=False)
+def _detect_roster_name_collisions():
+    """Flags provider folders that resolve to the exact same (first name,
+    segment) pair — e.g. two different folders both named 'Ashley - New
+    Provider'. That's the one case the app genuinely can't disambiguate on
+    its own, since it keys participants by (name, segment) together (see
+    build_participants/load_user_roster). Two providers who share a first
+    name but differ in segment (e.g. one 'Ashley - New Provider' and one
+    'Ashley - Top Provider') are NOT flagged — that case is already handled
+    correctly via segment matching and doesn't need any folder rename.
+    Returns {(name, segment): [full_folder_name, ...]} for any pair backed by
+    2+ folders."""
+    providers_dir = _providers_dir()
+    if providers_dir.exists():
+        folder_names = [
+            c.name for c in sorted(providers_dir.iterdir())
+            if c.is_dir() and not c.name.startswith(".") and "-" in c.name
+        ]
+    else:
+        folder_names = [
+            f["name"] for f in sorted(_list_drive_provider_folders(), key=lambda x: x["name"])
+            if "-" in f["name"]
+        ]
+
+    seen = {}
+    for full_name in folder_names:
+        name = _first_word(full_name.split("-", 1)[0])
+        if not name:
+            continue
+        name = _ALIAS_TO_CANONICAL.get(name.lower(), name)
+        segment = _segment_from_folder_name(full_name)
+        seen.setdefault((name, segment), []).append(full_name)
+
+    return {key: folders for key, folders in seen.items() if len(folders) > 1}
+
+
+@st.cache_data(ttl=300, show_spinner=False)
 def load_user_roster():
     """Builds the master participant list straight from the provider subfolders
     inside 'Kick off interviews' (or its 'Users' subfolder, see _providers_dir) —
@@ -703,10 +807,14 @@ def load_user_roster():
     roster, so every enrolled provider gets a dashboard card even before they have
     any rows in the Diary Study Google Sheet. Reads local subfolders when 'Kick
     off interviews' exists on disk, else falls back to listing the same folders
-    live from Drive. Returns {} only if neither is available."""
+    live from Drive. Returns a set of (name, segment) tuples — segment is part of
+    the identity, not just a label, precisely so that two providers who share a
+    first name (e.g. two 'Ashley' folders, one New one Pro) get two distinct
+    roster entries instead of one overwriting the other. Returns an empty set
+    only if neither location is available."""
     providers_dir = _providers_dir()
+    roster = set()
     if providers_dir.exists():
-        roster = {}
         for child in sorted(providers_dir.iterdir()):
             if not child.is_dir():
                 continue
@@ -715,47 +823,67 @@ def load_user_roster():
             # naming pattern, which always contains a "-".
             if child.name.startswith(".") or "-" not in child.name:
                 continue
-            name = child.name.split("-", 1)[0].strip()
+            name = _first_word(child.name.split("-", 1)[0])
             if not name:
                 continue
             name = _ALIAS_TO_CANONICAL.get(name.lower(), name)  # e.g. folder "Ami" -> roster name "Amy"
-            roster[name] = _segment_from_folder_name(child.name)
+            roster.add((name, _segment_from_folder_name(child.name)))
         return roster
 
-    roster = {}
     for f in sorted(_list_drive_provider_folders(), key=lambda x: x["name"]):
         if "-" not in f["name"]:
             continue
-        name = f["name"].split("-", 1)[0].strip()
+        name = _first_word(f["name"].split("-", 1)[0])
         if not name:
             continue
         name = _ALIAS_TO_CANONICAL.get(name.lower(), name)
-        roster[name] = _segment_from_folder_name(f["name"])
+        roster.add((name, _segment_from_folder_name(f["name"])))
     return roster
 
 
 def build_participants(entries):
+    """Builds the {key: participant} map the whole app renders from. `key` is
+    a (first_name, segment) tuple, not just a name — this is the actual fix
+    for two providers sharing a first name (e.g. two 'Ashley' folders, one New
+    one Pro): matching on name alone merged their entries onto one card, since
+    the Entries sheet already tells them apart via 'Ashley' vs 'Ashley P' but
+    that extra distinguishing text was being ignored. Each row's User Name is
+    reduced to its first word (see _first_word) so 'Ashley P' still lines up
+    with the segment-matched roster entry for the 'Ashley - Top Provider'
+    folder — but if a row's raw User Name is more specific than what's shown
+    so far (e.g. 'Ashley P' vs bare 'Ashley'), it's kept as the display name,
+    so the two Ashleys still read as distinguishable on screen without
+    renaming anything on disk."""
     roster = load_user_roster()
     participants = {
-        name: {"name": name, "segment": segment, "entries": [], "country": "", "age": ""}
-        for name, segment in roster.items()
+        key: {"key": key, "name": key[0], "segment": key[1], "entries": [], "country": "", "age": ""}
+        for key in roster
     }
 
     for row in entries:
-        name = row.get("User Name", "").strip()
-        if not name:
+        raw_name = row.get("User Name", "").strip()
+        if not raw_name:
             continue
+        first_name = _first_word(raw_name)
+        first_name = _ALIAS_TO_CANONICAL.get(first_name.lower(), first_name)
         seg_raw = str(row.get("Segment", "")).strip().upper()
         segment = SEGMENT_LABELS.get(seg_raw, seg_raw or "NEW")
-        if name not in participants:
-            participants[name] = {"name": name, "segment": segment, "entries": [], "country": "", "age": ""}
-        participants[name]["entries"].append(row)
+        key = (first_name, segment)
+        if key not in participants:
+            participants[key] = {
+                "key": key, "name": first_name, "segment": segment,
+                "entries": [], "country": "", "age": "",
+            }
+        p = participants[key]
+        if len(raw_name) > len(p["name"]):
+            p["name"] = raw_name
+        p["entries"].append(row)
         # Country/Age aren't in the Entries sheet today; this picks them up
         # automatically if those columns are ever added, without erroring otherwise.
-        if not participants[name]["country"] and row.get("Country"):
-            participants[name]["country"] = row["Country"]
-        if not participants[name]["age"] and row.get("Age"):
-            participants[name]["age"] = row["Age"]
+        if not p["country"] and row.get("Country"):
+            p["country"] = row["Country"]
+        if not p["age"] and row.get("Age"):
+            p["age"] = row["Age"]
 
     for p in participants.values():
         dates = [r.get("Date") for r in p["entries"] if r.get("Date")]
@@ -796,9 +924,12 @@ def classify_entry(row):
 
 
 # ---------------- NAVIGATION ----------------
-def go_to_profile(name):
+def go_to_profile(key):
+    """`key` is the participant's (first_name, segment) tuple — see
+    build_participants — not just a display name, so two providers sharing a
+    first name still navigate to distinct profiles."""
     st.session_state.view = "profile"
-    st.session_state.current_user = name
+    st.session_state.current_user = key
 
 
 def go_to_dash():
@@ -883,6 +1014,19 @@ def render_user_profiles_tab(participants):
         "Select a provider to see their kickoff background, weekly reflections, and daily entries."
     )
 
+    collisions = _detect_roster_name_collisions()
+    if collisions:
+        details = "; ".join(
+            f"**{name}** ({SEGMENT_DISPLAY.get(segment, segment)}) → {', '.join(folders)}"
+            for (name, segment), folders in collisions.items()
+        )
+        st.warning(
+            f"⚠️ Two folders resolve to the exact same provider (same first name *and* same "
+            f"segment) — their entries may be mixed together on one card: {details}. This one "
+            f"case can't be told apart automatically; rename one folder to a more specific name "
+            f"so they're distinguishable."
+        )
+
     top_col1, top_col2 = st.columns([5, 1])
     with top_col1:
         st.write("")
@@ -890,6 +1034,7 @@ def render_user_profiles_tab(participants):
         if st.button("Refresh data", use_container_width=True):
             load_entries.clear()
             load_user_roster.clear()
+            _detect_roster_name_collisions.clear()
             load_coded_interview.clear()
             load_snapshot.clear()
             load_journey_map.clear()
@@ -925,9 +1070,14 @@ def render_user_profiles_tab(participants):
                     unsafe_allow_html=True,
                 )
                 st.caption(f"{p['entry_count']} entries · {reflection_count} weekly reflections")
+                # Widget key and navigation both use the (name, segment) key,
+                # not just the display name — two providers sharing a first
+                # name (e.g. Ashley/Ashley) would otherwise get the same
+                # widget key, which Streamlit rejects, and would navigate to
+                # whichever one "name" happened to match first.
                 st.button(
-                    "View profile", key=f"btn_{p['name']}",
-                    on_click=go_to_profile, args=(p["name"],), use_container_width=True,
+                    "View profile", key=f"btn_{p['key'][0]}_{p['key'][1]}",
+                    on_click=go_to_profile, args=(p["key"],), use_container_width=True,
                 )
 
     st.divider()
@@ -939,14 +1089,22 @@ def render_user_profiles_tab(participants):
 
 # ---------------- PROFILE VIEW ----------------
 def render_profile(participants):
-    name = st.session_state.current_user
-    p = participants.get(name)
+    key = st.session_state.current_user
+    p = participants.get(key)
 
     st.button("← All providers", on_click=go_to_dash)
 
     if not p:
-        st.warning(f"No data found for {name}. It may have been removed from the sheet.")
+        shown_name = key[0] if isinstance(key, tuple) else key
+        st.warning(f"No data found for {shown_name}. It may have been removed from the sheet.")
         return
+
+    # Matching functions (get_provider_description, load_snapshot,
+    # load_coded_interview) look up a provider's Drive/local folder by first
+    # name + segment — always use p['key'] for that, not p['name'], since
+    # p['name'] may have been upgraded to a fuller display form (e.g. 'Ashley
+    # P') that never appears in the folder name itself.
+    lookup_name, lookup_segment = p["key"]
 
     st.caption(
         f"{p['entry_count']} entries · {p['first_date'] or '—'} to {p['last_date'] or '—'}"
@@ -960,7 +1118,7 @@ def render_profile(participants):
         st.markdown(badge_html(p["segment"]), unsafe_allow_html=True)
 
     try:
-        description = get_provider_description(p["name"])
+        description = get_provider_description(lookup_name, lookup_segment)
     except Exception:
         description = None
     if description:
@@ -976,12 +1134,12 @@ def render_profile(participants):
     activity_entries = [r for r in entries if classify_entry(r) == "activity"]
 
     try:
-        snapshot = load_snapshot(p["name"])
+        snapshot = load_snapshot(lookup_name, lookup_segment)
     except Exception:
         snapshot = None
 
     try:
-        coded = load_coded_interview(p["name"])
+        coded = load_coded_interview(lookup_name, lookup_segment)
     except Exception:
         coded = None
 
