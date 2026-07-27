@@ -2,6 +2,7 @@ import hashlib
 import html
 import io
 import re
+import time
 from datetime import datetime
 from pathlib import Path
 
@@ -10,6 +11,7 @@ import openpyxl
 import streamlit as st
 from google.oauth2.service_account import Credentials
 from googleapiclient.discovery import build
+from googleapiclient.http import MediaIoBaseDownload
 
 st.set_page_config(page_title="Provider Lifecycle Study — Sitter Profiles", layout="wide")
 
@@ -413,15 +415,36 @@ def get_drive_service():
 # provider subfolders and *_Coded.xlsx / Pro_Segment_Patterns.xlsx files, live from
 # the "Kick off interviews" Drive folder (secrets: drive.provider_folder_id) —
 # updating a workbook in Drive is all it takes, no GitHub step, ever.
+def _drive_download_with_retry(request, max_attempts=3):
+    """Runs a Drive API media/export request through MediaIoBaseDownload's
+    chunked, retry-aware transfer, with a few outer retries on top. Streamlit
+    Cloud's outbound connection occasionally drops mid-download (surfaces as
+    '[Errno 32] Broken pipe' or similar) — this rides out that kind of
+    transient network hiccup instead of failing the whole page load."""
+    last_error = None
+    for attempt in range(max_attempts):
+        try:
+            buffer = io.BytesIO()
+            downloader = MediaIoBaseDownload(buffer, request)
+            done = False
+            while not done:
+                _, done = downloader.next_chunk(num_retries=3)
+            return buffer.getvalue()
+        except Exception as e:
+            last_error = e
+            time.sleep(1 + attempt)
+    raise last_error
+
+
 def _download_drive_bytes(service, file_id, mime_type):
     if mime_type == "application/vnd.google-apps.spreadsheet":
-        data = service.files().export(
+        request = service.files().export_media(
             fileId=file_id,
             mimeType="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
-        ).execute()
+        )
     else:
-        data = service.files().get_media(fileId=file_id).execute()
-    return data if isinstance(data, bytes) else bytes(data)
+        request = service.files().get_media(fileId=file_id)
+    return _drive_download_with_retry(request)
 
 
 @st.cache_data(ttl=300, show_spinner=False)
@@ -665,9 +688,9 @@ def _load_entries_from_google_sheets():
         return cleaned
 
     # Uploaded .xlsx (not a native Google Sheet) — download the raw bytes via
-    # the Drive API and parse it exactly like a local file.
-    data = service.files().get_media(fileId=spreadsheet_id).execute()
-    data = data if isinstance(data, bytes) else bytes(data)
+    # the Drive API (chunked + retried, see _download_drive_bytes) and parse
+    # it exactly like a local file.
+    data = _download_drive_bytes(service, spreadsheet_id, mime_type)
     wb = openpyxl.load_workbook(io.BytesIO(data), data_only=True)
     return _parse_entries_workbook(wb, source_label="the Drive spreadsheet")
 
