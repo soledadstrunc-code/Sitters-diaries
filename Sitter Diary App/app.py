@@ -4,15 +4,15 @@ import io
 import re
 from datetime import datetime
 from pathlib import Path
- 
+
 import gspread
 import openpyxl
 import streamlit as st
 from google.oauth2.service_account import Credentials
 from googleapiclient.discovery import build
- 
+
 st.set_page_config(page_title="Provider Lifecycle Study — Sitter Profiles", layout="wide")
- 
+
 SEGMENT_LABELS = {
     "M": "MID", "T": "TOP", "N": "NEW", "P": "TOP",
     "MID": "MID", "TOP": "TOP", "NEW": "NEW", "PRO": "TOP",
@@ -23,9 +23,9 @@ SEGMENT_DISPLAY = {"TOP": "Pro Provider", "MID": "Mid Provider", "NEW": "New Pro
 SEGMENT_BADGE_LABEL = {"TOP": "PRO", "MID": "MID", "NEW": "NEW"}
 BADGE_COLORS = {"TOP": "#1E7A34", "MID": "#2455C4", "NEW": "#6B3FBF"}
 BADGE_BG = {"TOP": "#E9F6EC", "MID": "#EAF1FF", "NEW": "#F3EEFB"}
- 
+
 CORE_FIELDS = {"date", "user name", "segment", "week #"}
- 
+
 # ---------------- CODED INTERVIEWS (local _Coded.xlsx workbooks) ----------------
 # Provider subfolders (e.g. "Alexandra - New Provider") live inside "Kick off
 # interviews", a sibling of this app's own folder under the "User Diaries" project
@@ -41,7 +41,7 @@ CORE_FIELDS = {"date", "user name", "segment", "week #"}
 # model, Motivation, Client acquisition, ...) and add Snapshot/Atomic sheets. Rather
 # than hardcode one category list, load_coded_interview reads whatever category
 # rows are actually present in each participant's own Coding sheet.
- 
+
 KICKOFF_DIR = Path(__file__).resolve().parent.parent / "Kick off interviews"
 # Locally (Drive-synced Mac folder), this exists and everything below reads from
 # disk. On Streamlit Cloud, nothing gets uploaded to GitHub for this anymore — it
@@ -50,8 +50,8 @@ KICKOFF_DIR = Path(__file__).resolve().parent.parent / "Kick off interviews"
 # fallback helpers further down, after get_drive_service()). Either way, updating
 # a coded workbook or the diary study sheet just means saving in Drive as usual —
 # no re-upload to GitHub, ever.
- 
- 
+
+
 def _providers_dir():
     """Provider subfolders have sometimes lived directly under 'Kick off interviews'
     and sometimes under a 'Kick off interviews/Users' subfolder, depending on how the
@@ -59,7 +59,7 @@ def _providers_dir():
     path check) so either layout works without code changes if it moves again."""
     nested = KICKOFF_DIR / "Users"
     return nested if nested.exists() else KICKOFF_DIR
- 
+
 # Known mismatches between the participant name used in the Diary Study Google Sheet
 # and the folder/file name used under "Kick off interviews/Users" (folder names were
 # set from transcript filenames/participant IDs assigned before the interviews). Add
@@ -67,8 +67,8 @@ def _providers_dir():
 # named "Amy".
 NAME_ALIASES = {"Amy": "Ami"}
 _ALIAS_TO_CANONICAL = {alias.lower(): canonical for canonical, alias in NAME_ALIASES.items()}
- 
- 
+
+
 def _segment_from_folder_name(folder_name):
     """Provider folder names look like '<Name> - New Provider' / '... - Pro Provider'
     / '... - Mid Provider' (with occasional 'Prodiver' typos and inconsistent spacing
@@ -79,8 +79,8 @@ def _segment_from_folder_name(folder_name):
     suffix_words = parts[1].strip().split()
     seg_word = suffix_words[0].upper() if suffix_words else ""
     return SEGMENT_LABELS.get(seg_word, "NEW")
- 
- 
+
+
 def _find_coded_workbook_path(name):
     """Looks for <alias>_Coded.xlsx inside a per-provider subfolder of the local
     'Kick off interviews' folder (or its 'Users' subfolder, see _providers_dir).
@@ -101,8 +101,8 @@ def _find_coded_workbook_path(name):
         if matches:
             return matches[0]
     return None
- 
- 
+
+
 @st.cache_data(ttl=300, show_spinner=False)
 def load_snapshot(name):
     """Reads a participant's <Name>_Coded.xlsx 'Snapshot' sheet: a Field / Value /
@@ -121,7 +121,7 @@ def load_snapshot(name):
         wb = openpyxl.load_workbook(io.BytesIO(data), data_only=True)
     if "Snapshot" not in wb.sheetnames:
         return None
- 
+
     rows = []
     for row in wb["Snapshot"].iter_rows(min_row=2, values_only=True):
         if not row or not row[0]:
@@ -131,18 +131,18 @@ def load_snapshot(name):
         quote = row[2] if len(row) > 2 and row[2] else ""
         rows.append((field, str(value), str(quote)))
     return rows or None
- 
- 
+
+
 _QUOTE_RE = re.compile(r'"([^"]*)"')
- 
- 
+
+
 def gray_quotes(text):
     """Wraps double-quoted substrings (verbatim participant quotes) in Streamlit's
     gray-colored markdown span, so quotes read visually distinct from the summary
     prose around them."""
     return _QUOTE_RE.sub(lambda m: f':gray["{m.group(1)}"]', text)
- 
- 
+
+
 def split_into_lines(text):
     """Coded summaries are either a bullet list (points separated by '•', with
     embedded newlines that Markdown collapses instead of rendering as line breaks)
@@ -154,12 +154,12 @@ def split_into_lines(text):
     else:
         parts = [s.strip() for s in re.split(r'(?<=\.)\s+(?=[A-Z"“])', text) if s.strip()]
     return parts or [text.strip()]
- 
- 
+
+
 # Streamlit's default body text renders around 16px (~12pt); titles/labels below
 # are sized a couple points bigger so they stand out from the surrounding text.
 TITLE_FONT_SIZE = "1.15rem"
- 
+
 # One relevant emoji per Background category, covering both coding taxonomies used
 # across the study (see the taxonomy note above load_coded_interview). Matched
 # case-insensitively; anything unrecognized (a future taxonomy revision, etc.)
@@ -190,27 +190,27 @@ CATEGORY_EMOJIS = {
     "growth and future plans": "📈",
 }
 DEFAULT_CATEGORY_EMOJI = "📌"
- 
- 
+
+
 def category_emoji(category):
     return CATEGORY_EMOJIS.get(category.strip().lower(), DEFAULT_CATEGORY_EMOJI)
- 
- 
+
+
 def render_title(text):
     """Renders a standalone section/category heading at TITLE_FONT_SIZE."""
     st.markdown(
         f'<div style="font-size:{TITLE_FONT_SIZE}; font-weight:600; margin:10px 0 2px;">{text}</div>',
         unsafe_allow_html=True,
     )
- 
- 
+
+
 def render_entries_table(rows, columns):
     """Renders a plain HTML table with fixed column widths, instead of st.table's
     auto-sizing (which was squeezing the Date column so narrow that dates wrapped
     across multiple lines). Short columns (like Date) stay on one line; the last
     column gets the remaining width and wraps normally so long Description text
     is fully readable without being cut off or forcing odd row heights elsewhere.
- 
+
     `columns` is a list of (header, key, width_css) tuples; width_css is any valid
     CSS width value (e.g. "100px"), or None for the flexible last column."""
     thead = "".join(
@@ -231,14 +231,14 @@ def render_entries_table(rows, columns):
                 f'vertical-align:top;{nowrap}">{value}</td>'
             )
         body_rows.append(f"<tr>{''.join(cells)}</tr>")
- 
+
     st.markdown(
         f'<table style="width:100%;border-collapse:collapse;font-size:13px;">'
         f'<thead><tr>{thead}</tr></thead><tbody>{"".join(body_rows)}</tbody></table>',
         unsafe_allow_html=True,
     )
- 
- 
+
+
 @st.cache_data(ttl=300, show_spinner=False)
 def load_coded_interview(name):
     """Reads a participant's <Name>_Coded.xlsx 'Coding' sheet from the local 'Kick
@@ -258,25 +258,25 @@ def load_coded_interview(name):
         wb = openpyxl.load_workbook(io.BytesIO(data), data_only=True)
     if "Coding" not in wb.sheetnames:
         return None
- 
+
     date_coded = ""
     if "Metadata" in wb.sheetnames:
         for row in wb["Metadata"].iter_rows(values_only=True):
             if row and row[0] and str(row[0]).strip().lower() == "date coded":
                 date_coded = row[1] if len(row) > 1 and row[1] else ""
                 break
- 
+
     categories = []
     for row in wb["Coding"].iter_rows(min_row=2, values_only=True):
         if row and row[0]:
             summary = row[1] if len(row) > 1 and row[1] else "Not discussed in this interview"
             categories.append((str(row[0]).strip(), str(summary)))
- 
+
     if not categories:
         return None
     return {"dateCoded": str(date_coded) if date_coded else "", "categories": categories}
- 
- 
+
+
 # ---------------- JOURNEY MAP (Pro_Segment_Patterns.xlsx) ----------------
 @st.cache_data(ttl=300, show_spinner=False)
 def load_journey_map():
@@ -300,9 +300,9 @@ def load_journey_map():
         wb = openpyxl.load_workbook(io.BytesIO(data), data_only=True)
     if "Journey Map (Pro)" not in wb.sheetnames:
         return None
- 
+
     rows = list(wb["Journey Map (Pro)"].iter_rows(values_only=True))
- 
+
     # Section 1: stage backbone — rows right after the header, until a blank Stage.
     stages = []
     i = 1
@@ -311,7 +311,7 @@ def load_journey_map():
         stages.append({"stage": str(stage), "covers": covers or "", "leakage": leakage or "", "items": []})
         i += 1
     stage_lookup = {s["stage"]: s for s in stages}
- 
+
     # Section 2: "Frictions, Needs & Workarounds by Stage" — find its column-header
     # row (Stage/Theme/Type/...), then read data rows until the next blank Stage.
     j = i
@@ -328,7 +328,7 @@ def load_journey_map():
                 "observation": r[6] or "", "quote": r[7] or "",
             })
         j += 1
- 
+
     # Section 3: "Cross-Cutting Frictions, Needs & Workarounds" — find its
     # column-header row (Theme/Theme definition/...), then read until blank Theme.
     k = j
@@ -343,24 +343,24 @@ def load_journey_map():
             "stage_count": r[3] or 0, "stages_detail": r[4] or "", "total_providers": r[5] or 0,
         })
         k += 1
- 
+
     return {"stages": stages, "cross_cutting": cross_cutting}
- 
- 
+
+
 # ---------------- AUTH ----------------
 def check_login(email, password):
     auth_cfg = st.secrets.get("auth", {})
     allowed_domain = auth_cfg.get("allowed_domain", "").strip().lower()
     shared_hash = auth_cfg.get("shared_password_hash", "")
- 
+
     email = email.strip().lower()
     if not allowed_domain or not shared_hash:
         return False
     if not email.endswith("@" + allowed_domain):
         return False
     return hashlib.sha256(password.encode()).hexdigest() == shared_hash
- 
- 
+
+
 def render_login():
     st.title("Provider Lifecycle Study — Sitter Profiles")
     st.caption("Sign in with your Rover email to view the diary study dashboard.")
@@ -375,8 +375,8 @@ def render_login():
             st.rerun()
         else:
             st.error("Incorrect email or password, or your email isn't a Rover address.")
- 
- 
+
+
 def render_logout_button():
     with st.sidebar:
         st.caption(f"Signed in as {st.session_state.get('user_email', '')}")
@@ -384,29 +384,29 @@ def render_logout_button():
             for key in ("authenticated", "user_email", "view", "current_user"):
                 st.session_state.pop(key, None)
             st.rerun()
- 
- 
+
+
 # ---------------- GOOGLE SHEETS ----------------
 SCOPES = [
     "https://www.googleapis.com/auth/spreadsheets.readonly",
     "https://www.googleapis.com/auth/drive.readonly",
 ]
- 
- 
+
+
 @st.cache_resource(show_spinner=False)
 def get_gspread_client():
     info = dict(st.secrets["gcp_service_account"])
     creds = Credentials.from_service_account_info(info, scopes=SCOPES)
     return gspread.authorize(creds)
- 
- 
+
+
 @st.cache_resource(show_spinner=False)
 def get_drive_service():
     info = dict(st.secrets["gcp_service_account"])
     creds = Credentials.from_service_account_info(info, scopes=SCOPES)
     return build("drive", "v3", credentials=creds)
- 
- 
+
+
 # ---------------- DRIVE-BASED FALLBACKS (no local 'Kick off interviews' folder) ----------------
 # Used only when KICKOFF_DIR doesn't exist on disk (i.e. on Streamlit Cloud, where
 # nothing under "Kick off interviews" is uploaded to GitHub at all). Reads the same
@@ -422,8 +422,8 @@ def _download_drive_bytes(service, file_id, mime_type):
     else:
         data = service.files().get_media(fileId=file_id).execute()
     return data if isinstance(data, bytes) else bytes(data)
- 
- 
+
+
 @st.cache_data(ttl=300, show_spinner=False)
 def _list_drive_provider_folders():
     """All subfolders directly under the 'Kick off interviews' Drive folder, e.g.
@@ -446,8 +446,8 @@ def _list_drive_provider_folders():
         if not page_token:
             break
     return folders
- 
- 
+
+
 @st.cache_data(ttl=300, show_spinner=False)
 def _find_drive_coded_workbook_bytes(name):
     """Drive equivalent of _find_coded_workbook_path: finds this provider's
@@ -457,7 +457,7 @@ def _find_drive_coded_workbook_bytes(name):
     if not root_folder_id:
         return None
     candidates = {name.strip().lower(), NAME_ALIASES.get(name.strip(), name.strip()).lower()}
- 
+
     target_folder_id = None
     for f in _list_drive_provider_folders():
         prefix = f["name"].split("-")[0].strip().lower()
@@ -466,15 +466,15 @@ def _find_drive_coded_workbook_bytes(name):
             break
     if not target_folder_id:
         return None
- 
+
     service = get_drive_service()
     file_query = f"'{target_folder_id}' in parents and name contains '_Coded.xlsx' and trashed = false"
     files = service.files().list(q=file_query, fields="files(id, mimeType)").execute().get("files", [])
     if not files:
         return None
     return _download_drive_bytes(service, files[0]["id"], files[0].get("mimeType", ""))
- 
- 
+
+
 @st.cache_data(ttl=300, show_spinner=False)
 def _find_drive_file_bytes_by_name(filename):
     """Looks for a specific file (e.g. 'Pro_Segment_Patterns.xlsx') directly
@@ -489,8 +489,8 @@ def _find_drive_file_bytes_by_name(filename):
     if not files:
         return None
     return _download_drive_bytes(service, files[0]["id"], files[0].get("mimeType", ""))
- 
- 
+
+
 @st.cache_data(ttl=300, show_spinner=False)
 def get_provider_description(name):
     """Looks for a Google Doc inside this provider's Drive subfolder (under the
@@ -500,9 +500,9 @@ def get_provider_description(name):
     root_folder_id = drive_cfg.get("provider_folder_id")
     if not root_folder_id:
         return None
- 
+
     service = get_drive_service()
- 
+
     safe_name = name.replace("'", "\\'")
     folder_query = (
         f"'{root_folder_id}' in parents and mimeType = 'application/vnd.google-apps.folder' "
@@ -512,7 +512,7 @@ def get_provider_description(name):
     if not folders:
         return None
     provider_folder_id = folders[0]["id"]
- 
+
     doc_query = (
         f"'{provider_folder_id}' in parents and mimeType = 'application/vnd.google-apps.document' "
         "and trashed = false"
@@ -522,16 +522,16 @@ def get_provider_description(name):
     ).execute().get("files", [])
     if not docs:
         return None
- 
+
     doc_id = docs[0]["id"]
     content = service.files().export(fileId=doc_id, mimeType="text/plain").execute()
     text = content.decode("utf-8") if isinstance(content, bytes) else content
     return text.strip() or None
- 
- 
+
+
 DIARY_STUDY_XLSX = Path(__file__).resolve().parent.parent / "Rover_Diary_Study_Tool.xlsx"
- 
- 
+
+
 def _find_header_row(all_values):
     """The Entries sheet may have a title/banner row above the real header row
     (e.g. 'ROVER DIARY STUDY — SYNTHESIS ANALYSIS TOOL'), so scan for the row that
@@ -541,8 +541,8 @@ def _find_header_row(all_values):
         if "user name" in normalized and "date" in normalized:
             return i
     return 0
- 
- 
+
+
 def _dedupe_headers(raw_headers):
     headers = []
     seen = {}
@@ -557,8 +557,8 @@ def _dedupe_headers(raw_headers):
             seen[name] = 0
         headers.append(name)
     return headers
- 
- 
+
+
 @st.cache_data(ttl=300, show_spinner=False)
 def load_entries():
     """Loads the diary study Entries data. Prefers a local copy of
@@ -568,32 +568,34 @@ def load_entries():
     if DIARY_STUDY_XLSX.exists():
         return _load_entries_from_local_file(DIARY_STUDY_XLSX)
     return _load_entries_from_google_sheets()
- 
- 
-def _load_entries_from_local_file(path):
-    wb = openpyxl.load_workbook(path, data_only=True)
+
+
+def _parse_entries_workbook(wb, source_label="the workbook"):
+    """Shared parser for an already-open openpyxl Workbook containing an
+    'Entries' sheet — used whether that workbook came from a local file or was
+    downloaded as raw bytes from Drive."""
     entries_ws = None
     for ws in wb.worksheets:
         if "entries" in ws.title.lower():
             entries_ws = ws
             break
     if entries_ws is None:
-        raise RuntimeError(f"Could not find a sheet containing 'Entries' in {path.name}.")
- 
+        raise RuntimeError(f"Could not find a sheet containing 'Entries' in {source_label}.")
+
     all_values = list(entries_ws.iter_rows(values_only=True))
     if not all_values:
         return []
- 
+
     header_row_idx = _find_header_row(all_values)
     headers = _dedupe_headers(all_values[header_row_idx])
- 
+
     records = []
     for row_values in all_values[header_row_idx + 1:]:
         if not any(str(cell).strip() for cell in row_values if cell is not None):
             continue
         padded = list(row_values) + [None] * (len(headers) - len(row_values))
         records.append(dict(zip(headers, padded)))
- 
+
     cleaned = []
     for r in records:
         row = {}
@@ -610,44 +612,66 @@ def _load_entries_from_local_file(path):
         if row.get("User Name"):
             cleaned.append(row)
     return cleaned
- 
- 
+
+
+def _load_entries_from_local_file(path):
+    wb = openpyxl.load_workbook(path, data_only=True)
+    return _parse_entries_workbook(wb, source_label=path.name)
+
+
 def _load_entries_from_google_sheets():
-    client = get_gspread_client()
+    """Reads the diary study Entries data live from Drive. The 'spreadsheet_id'
+    secret may point at either a native Google Sheet (mimeType
+    application/vnd.google-apps.spreadsheet, read via gspread) or an uploaded
+    .xlsx file living in Drive (any other mimeType, downloaded as raw bytes and
+    parsed with openpyxl) — both are supported so this keeps working regardless
+    of which kind of file ends up at that ID."""
     spreadsheet_id = st.secrets["sheet"]["spreadsheet_id"]
-    sh = client.open_by_key(spreadsheet_id)
- 
-    entries_ws = None
-    for ws in sh.worksheets():
-        if "entries" in ws.title.lower():
-            entries_ws = ws
-            break
-    if entries_ws is None:
-        raise RuntimeError("Could not find a tab containing 'Entries' in the spreadsheet.")
- 
-    all_values = entries_ws.get_all_values()
-    if not all_values:
-        return []
- 
-    header_row_idx = _find_header_row(all_values)
-    headers = _dedupe_headers(all_values[header_row_idx])
- 
-    records = []
-    for row_values in all_values[header_row_idx + 1:]:
-        if not any(cell.strip() for cell in row_values):
-            continue
-        padded = row_values + [""] * (len(headers) - len(row_values))
-        records.append(dict(zip(headers, padded)))
- 
-    # Normalize keys for easier lookup while keeping original labels for display
-    cleaned = []
-    for r in records:
-        row = {k.strip(): (v.strip() if isinstance(v, str) else v) for k, v in r.items()}
-        if row.get("User Name"):
-            cleaned.append(row)
-    return cleaned
- 
- 
+    service = get_drive_service()
+    meta = service.files().get(fileId=spreadsheet_id, fields="mimeType").execute()
+    mime_type = meta.get("mimeType", "")
+
+    if mime_type == "application/vnd.google-apps.spreadsheet":
+        client = get_gspread_client()
+        sh = client.open_by_key(spreadsheet_id)
+
+        entries_ws = None
+        for ws in sh.worksheets():
+            if "entries" in ws.title.lower():
+                entries_ws = ws
+                break
+        if entries_ws is None:
+            raise RuntimeError("Could not find a tab containing 'Entries' in the spreadsheet.")
+
+        all_values = entries_ws.get_all_values()
+        if not all_values:
+            return []
+
+        header_row_idx = _find_header_row(all_values)
+        headers = _dedupe_headers(all_values[header_row_idx])
+
+        records = []
+        for row_values in all_values[header_row_idx + 1:]:
+            if not any(cell.strip() for cell in row_values):
+                continue
+            padded = row_values + [""] * (len(headers) - len(row_values))
+            records.append(dict(zip(headers, padded)))
+
+        cleaned = []
+        for r in records:
+            row = {k.strip(): (v.strip() if isinstance(v, str) else v) for k, v in r.items()}
+            if row.get("User Name"):
+                cleaned.append(row)
+        return cleaned
+
+    # Uploaded .xlsx (not a native Google Sheet) — download the raw bytes via
+    # the Drive API and parse it exactly like a local file.
+    data = service.files().get_media(fileId=spreadsheet_id).execute()
+    data = data if isinstance(data, bytes) else bytes(data)
+    wb = openpyxl.load_workbook(io.BytesIO(data), data_only=True)
+    return _parse_entries_workbook(wb, source_label="the Drive spreadsheet")
+
+
 @st.cache_data(ttl=300, show_spinner=False)
 def load_user_roster():
     """Builds the master participant list straight from the provider subfolders
@@ -674,7 +698,7 @@ def load_user_roster():
             name = _ALIAS_TO_CANONICAL.get(name.lower(), name)  # e.g. folder "Ami" -> roster name "Amy"
             roster[name] = _segment_from_folder_name(child.name)
         return roster
- 
+
     roster = {}
     for f in sorted(_list_drive_provider_folders(), key=lambda x: x["name"]):
         if "-" not in f["name"]:
@@ -685,15 +709,15 @@ def load_user_roster():
         name = _ALIAS_TO_CANONICAL.get(name.lower(), name)
         roster[name] = _segment_from_folder_name(f["name"])
     return roster
- 
- 
+
+
 def build_participants(entries):
     roster = load_user_roster()
     participants = {
         name: {"name": name, "segment": segment, "entries": [], "country": "", "age": ""}
         for name, segment in roster.items()
     }
- 
+
     for row in entries:
         name = row.get("User Name", "").strip()
         if not name:
@@ -709,28 +733,28 @@ def build_participants(entries):
             participants[name]["country"] = row["Country"]
         if not participants[name]["age"] and row.get("Age"):
             participants[name]["age"] = row["Age"]
- 
+
     for p in participants.values():
         dates = [r.get("Date") for r in p["entries"] if r.get("Date")]
         p["entry_count"] = len(p["entries"])
         p["first_date"] = min(dates) if dates else None
         p["last_date"] = max(dates) if dates else None
     return participants
- 
- 
+
+
 def badge_html(segment):
     color = BADGE_COLORS.get(segment, "#4B5565")
     bg = BADGE_BG.get(segment, "#F1F3F6")
     label = SEGMENT_BADGE_LABEL.get(segment, segment)
     return f'<span style="font-size:11px;font-weight:700;padding:3px 8px;border-radius:6px;background:{bg};color:{color};">{label}</span>'
- 
- 
+
+
 def classify_entry(row):
     """Buckets each Entries row into one of two sections shown on a provider's
     profile (reflection vs. regular diary activity). Week-0 kickoff rows are
     excluded entirely (they're superseded by the coded interview Snapshot/
     Background tabs), everything else is a real diary entry.
- 
+
     NOTE: this used to also treat any row whose Question started with "Topic" as
     a Week-0-only background row, but ordinary ongoing diary entries are also
     phrased as topic questions — that was silently dropping real diary entries
@@ -740,65 +764,65 @@ def classify_entry(row):
     task_type = str(row.get("Task Type", "")).lower()
     experience = str(row.get("Experience Moment", "")).lower()
     week = str(row.get("Week #", "")).strip()
- 
+
     if "reflect" in question or "reflect" in task_type or "reflect" in experience:
         return "reflection"
     if week == "0":
         return "background"
     return "activity"
- 
- 
+
+
 # ---------------- NAVIGATION ----------------
 def go_to_profile(name):
     st.session_state.view = "profile"
     st.session_state.current_user = name
- 
- 
+
+
 def go_to_dash():
     st.session_state.view = "dash"
     st.session_state.current_user = None
- 
- 
+
+
 # ---------------- DASHBOARD VIEW ----------------
 def render_dashboard(participants):
     st.title("Provider Lifecycle Study — Sitter Profiles")
- 
+
     tab_profiles, tab_patterns = st.tabs(["User Profiles", "User Patterns"])
- 
+
     with tab_profiles:
         render_user_profiles_tab(participants)
- 
+
     with tab_patterns:
         # Journey map hidden for now (render_user_patterns_tab still has the full
         # implementation below — just not called — so it's a one-line change to
         # bring back).
         st.info("Coming soon — this tab will surface cross-participant patterns and themes.")
- 
- 
+
+
 def render_user_patterns_tab():
     try:
         journey = load_journey_map()
     except Exception:
         journey = None
- 
+
     if not journey:
         st.info(
             "No journey map found yet. Once \"Pro_Segment_Patterns.xlsx\" exists in the "
             "\"Kick off interviews\" folder with a \"Journey Map (Pro)\" sheet, it will show here."
         )
         return
- 
+
     st.caption(
         "Pro segment journey map — synthesized across 14 Pro providers' coded interviews "
         "(Pro_Segment_Patterns.xlsx)."
     )
- 
+
     last_stage_index = len(journey["stages"]) - 1
     for i, stage in enumerate(journey["stages"]):
         render_title(f"{category_emoji(stage['stage'])} {stage['stage']}")
         if stage["covers"]:
             st.markdown(gray_quotes(stage["covers"]))
- 
+
         items = sorted(stage["items"], key=lambda it: it["distinct_providers"], reverse=True)
         if items:
             st.markdown("**Top frictions, needs & workarounds**")
@@ -807,14 +831,14 @@ def render_user_patterns_tab():
                     f"- **{it['theme']}** ({it['type']}, {it['distinct_providers']} of 14 providers) — "
                     f"{gray_quotes(it['observation'])}"
                 )
- 
+
         leakage = stage["leakage"]
         if leakage and not leakage.lower().startswith("no off-platform-clients-leakage"):
             st.caption(f"Off-platform leakage: {gray_quotes(leakage)}")
- 
+
         if i < last_stage_index:
             st.divider()
- 
+
     if journey["cross_cutting"]:
         st.divider()
         render_title("🔗 Cross-cutting themes")
@@ -828,14 +852,14 @@ def render_user_patterns_tab():
             )
             if i < last_cc_index:
                 st.divider()
- 
- 
+
+
 def render_user_profiles_tab(participants):
     st.caption(
         "Data refreshes automatically from Rover_Diary_Study_Tool (fed from MyInsights). "
         "Select a provider to see their kickoff background, weekly reflections, and daily entries."
     )
- 
+
     top_col1, top_col2 = st.columns([5, 1])
     with top_col1:
         st.write("")
@@ -851,21 +875,21 @@ def render_user_profiles_tab(participants):
             _find_drive_file_bytes_by_name.clear()
             get_provider_description.clear()
             st.rerun()
- 
+
     st.markdown("**Filter by segment**")
     seg_filter_labels = {"ALL": "All", "NEW": "New", "MID": "Mid", "TOP": "Pro"}
     seg_filter = st.radio(
         "Segment", ["ALL", "NEW", "MID", "TOP"], horizontal=True, label_visibility="collapsed",
         format_func=lambda code: seg_filter_labels.get(code, code),
     )
- 
+
     filtered = [p for p in participants.values() if seg_filter == "ALL" or p["segment"] == seg_filter]
     filtered.sort(key=lambda p: p["name"])
- 
+
     if not filtered:
         st.info("No providers match your filters yet.")
         return
- 
+
     st.write("")
     cols = st.columns(4)
     for i, p in enumerate(filtered):
@@ -882,36 +906,36 @@ def render_user_profiles_tab(participants):
                     "View profile", key=f"btn_{p['name']}",
                     on_click=go_to_profile, args=(p["name"],), use_container_width=True,
                 )
- 
+
     st.divider()
     st.caption(
         f"{len(participants)} providers total, sourced live from the Entries tab of Rover_Diary_Study_Tool. "
         "Segment codes: N = new, M = mid, P = pro."
     )
- 
- 
+
+
 # ---------------- PROFILE VIEW ----------------
 def render_profile(participants):
     name = st.session_state.current_user
     p = participants.get(name)
- 
+
     st.button("← All providers", on_click=go_to_dash)
- 
+
     if not p:
         st.warning(f"No data found for {name}. It may have been removed from the sheet.")
         return
- 
+
     st.caption(
         f"{p['entry_count']} entries · {p['first_date'] or '—'} to {p['last_date'] or '—'}"
     )
- 
+
     header_col1, header_col2 = st.columns([5, 1])
     with header_col1:
         segment_label = SEGMENT_DISPLAY.get(p["segment"], p["segment"])
         st.header(f"{p['name']} - {segment_label}")
     with header_col2:
         st.markdown(badge_html(p["segment"]), unsafe_allow_html=True)
- 
+
     try:
         description = get_provider_description(p["name"])
     except Exception:
@@ -923,25 +947,25 @@ def render_profile(participants):
             "No description yet — add a Google Doc to this provider's folder inside "
             "\"Kick off interviews\" in Drive and it will show up here."
         )
- 
+
     entries = p["entries"]
     reflection_entries = [r for r in entries if classify_entry(r) == "reflection"]
     activity_entries = [r for r in entries if classify_entry(r) == "activity"]
- 
+
     try:
         snapshot = load_snapshot(p["name"])
     except Exception:
         snapshot = None
- 
+
     try:
         coded = load_coded_interview(p["name"])
     except Exception:
         coded = None
- 
+
     tab_snapshot, tab_background, tab_diary, tab_reflections = st.tabs(
         ["Snapshot", "Background", "Daily entries", "Weekly reflections"]
     )
- 
+
     with tab_snapshot:
         if not snapshot:
             st.info(
@@ -955,7 +979,7 @@ def render_profile(participants):
                 render_title(field)
                 for line in split_into_lines(str(value)):
                     st.markdown(gray_quotes(line))
- 
+
     with tab_background:
         if not coded:
             st.info(
@@ -975,7 +999,7 @@ def render_profile(participants):
                     st.markdown(gray_quotes(line))
                 if i < last_index:
                     st.divider()
- 
+
     with tab_diary:
         if not activity_entries:
             st.info("No daily entries logged yet for this provider.")
@@ -989,7 +1013,7 @@ def render_profile(participants):
                     ("Description", "Description", None),
                 ],
             )
- 
+
     with tab_reflections:
         st.caption(f"{len(reflection_entries)} weekly reflections")
         if not reflection_entries:
@@ -1007,16 +1031,16 @@ def render_profile(participants):
                         if key in CORE_FIELDS or not value:
                             continue
                         st.caption(f"**{field}:** {value}")
- 
- 
+
+
 # ---------------- ROUTER ----------------
 def main():
     if not st.session_state.get("authenticated"):
         render_login()
         return
- 
+
     render_logout_button()
- 
+
     # No secrets check here: load_entries() reads Rover_Diary_Study_Tool.xlsx
     # locally when it's present and only needs gcp_service_account/sheet secrets
     # in the Google Sheets fallback path, so requiring them upfront would block
@@ -1026,20 +1050,19 @@ def main():
     except Exception as e:
         st.error(f"Could not load diary study data: {e}")
         return
- 
+
     participants = build_participants(entries)
- 
+
     if "view" not in st.session_state:
         st.session_state.view = "dash"
     if "current_user" not in st.session_state:
         st.session_state.current_user = None
- 
+
     if st.session_state.view == "dash":
         render_dashboard(participants)
     else:
         render_profile(participants)
- 
- 
+
+
 if __name__ == "__main__":
     main()
- 
