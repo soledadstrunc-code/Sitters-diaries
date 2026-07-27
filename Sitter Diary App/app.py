@@ -491,12 +491,7 @@ def _drive_download_with_retry(file_id, mime_type, max_attempts=3):
     raise last_error
 
 
-def _download_drive_bytes(service, file_id, mime_type):
-    # `service` is accepted for call-site compatibility (callers already have
-    # one from an earlier metadata call), but each retry attempt below gets
-    # its own — possibly freshly rebuilt — service instance instead of
-    # reusing this one, since a stale cached connection is the likely cause
-    # of broken-pipe errors, not a one-off network blip.
+def _download_drive_bytes(file_id, mime_type):
     return _drive_download_with_retry(file_id, mime_type)
 
 
@@ -553,7 +548,7 @@ def _find_drive_coded_workbook_bytes(name, segment=None):
     files = service.files().list(q=file_query, fields="files(id, mimeType)").execute().get("files", [])
     if not files:
         return None
-    return _download_drive_bytes(service, files[0]["id"], files[0].get("mimeType", ""))
+    return _download_drive_bytes(files[0]["id"], files[0].get("mimeType", ""))
 
 
 @st.cache_data(ttl=300, show_spinner=False)
@@ -569,7 +564,7 @@ def _find_drive_file_bytes_by_name(filename):
     files = service.files().list(q=query, fields="files(id, mimeType)").execute().get("files", [])
     if not files:
         return None
-    return _download_drive_bytes(service, files[0]["id"], files[0].get("mimeType", ""))
+    return _download_drive_bytes(files[0]["id"], files[0].get("mimeType", ""))
 
 
 @st.cache_data(ttl=300, show_spinner=False)
@@ -758,7 +753,7 @@ def _load_entries_from_google_sheets():
     # Uploaded .xlsx (not a native Google Sheet) — download the raw bytes via
     # the Drive API (chunked + retried, see _download_drive_bytes) and parse
     # it exactly like a local file.
-    data = _download_drive_bytes(service, spreadsheet_id, mime_type)
+    data = _download_drive_bytes(spreadsheet_id, mime_type)
     wb = openpyxl.load_workbook(io.BytesIO(data), data_only=True)
     return _parse_entries_workbook(wb, source_label="the Drive spreadsheet")
 
