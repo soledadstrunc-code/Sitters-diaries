@@ -93,12 +93,14 @@ def _find_coded_workbook_path(name):
     alias for it."""
     providers_dir = _providers_dir()
     if not providers_dir.exists():
-        return None
-    candidates = {name.strip().lower(), NAME_ALIASES.get(name.strip(), name.strip()).lower()}
-    for child in providers_dir.iterdir():
+        return {}
+    roster = {}
+    for child in sorted(providers_dir.iterdir()):
         if not child.is_dir():
             continue
-        folder_prefix = child.name.split("-")[0].strip().lower()
+        if child.name.startswith(".") or "-" not in child.name:
+            continue
+        name = child.name.split("-", 1)[0].strip()
         if folder_prefix not in candidates:
             continue
         matches = list(child.glob("*_Coded.xlsx"))
