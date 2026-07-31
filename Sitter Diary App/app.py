@@ -1076,7 +1076,6 @@ def render_user_profiles_tab(participants):
     st.write("")
     cols = st.columns(4)
     for i, p in enumerate(filtered):
-        reflection_count = sum(1 for r in p["entries"] if classify_entry(r) == "reflection")
         with cols[i % 4]:
             with st.container(border=True):
                 st.markdown(
@@ -1084,7 +1083,7 @@ def render_user_profiles_tab(participants):
                     f'<b>{p["name"]}</b>{badge_html(p["segment"])}</div>',
                     unsafe_allow_html=True,
                 )
-                st.caption(f"{p['entry_count']} entries · {reflection_count} weekly reflections")
+                st.caption(f"{p['entry_count']} entries")
                 # Widget key and navigation both use the (name, segment) key,
                 # not just the display name — two providers sharing a first
                 # name (e.g. Ashley/Ashley) would otherwise get the same
