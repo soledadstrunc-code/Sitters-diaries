@@ -66,8 +66,8 @@ def _providers_dir():
 # and the folder/file name used under "Kick off interviews/Users" (folder names were
 # set from transcript filenames/participant IDs assigned before the interviews). Add
 # to this if more turn up — e.g. the "Ami" folder is actually about a participant
-# named "Amy".
-NAME_ALIASES = {"Amy": "Ami"}
+# named "Amy"; "TR" in the Entries sheet is the same person as "Tianrui".
+NAME_ALIASES = {"Amy": "Ami", "Tianrui": "TR"}
 _ALIAS_TO_CANONICAL = {alias.lower(): canonical for canonical, alias in NAME_ALIASES.items()}
 
 
@@ -855,6 +855,18 @@ def build_participants(entries):
         for key in roster
     }
 
+    # Map each first name to the roster key(s) that use it. Most names are unique
+    # in the roster, so those entries are matched on name alone and use the
+    # roster's own segment — not the sheet row's Segment column, which can be
+    # wrong (e.g. Naomi's rows are all tagged Segment "M" in the sheet even
+    # though her folder says Pro; trusting that value created a second, bogus
+    # "Naomi (Mid)" card). The row's Segment is only consulted as a tie-breaker
+    # for names that genuinely belong to more than one roster entry (e.g. two
+    # different "Ashley" providers, one New one Pro).
+    roster_by_name = {}
+    for key in roster:
+        roster_by_name.setdefault(key[0], []).append(key)
+
     for row in entries:
         raw_name = row.get("User Name", "").strip()
         if not raw_name:
@@ -862,11 +874,19 @@ def build_participants(entries):
         first_name = _first_word(raw_name)
         first_name = _ALIAS_TO_CANONICAL.get(first_name.lower(), first_name)
         seg_raw = str(row.get("Segment", "")).strip().upper()
-        segment = SEGMENT_LABELS.get(seg_raw, seg_raw or "NEW")
-        key = (first_name, segment)
+        row_segment = SEGMENT_LABELS.get(seg_raw, seg_raw or "NEW")
+
+        matches = roster_by_name.get(first_name, [])
+        if len(matches) == 1:
+            key = matches[0]
+        elif len(matches) > 1:
+            key = next((k for k in matches if k[1] == row_segment), matches[0])
+        else:
+            key = (first_name, row_segment)
+
         if key not in participants:
             participants[key] = {
-                "key": key, "name": first_name, "segment": segment,
+                "key": key, "name": first_name, "segment": key[1],
                 "entries": [], "country": "", "age": "",
             }
         p = participants[key]
@@ -1138,8 +1158,8 @@ def render_profile(participants):
     except Exception:
         coded = None
 
-    tab_snapshot, tab_background, tab_diary, tab_reflections = st.tabs(
-        ["Snapshot", "Background", "Daily entries", "Weekly reflections"]
+    tab_snapshot, tab_background, tab_daily = st.tabs(
+        ["Snapshot", "Background", "Daily entries and Weekly reflections"]
     )
 
     with tab_snapshot:
@@ -1176,37 +1196,20 @@ def render_profile(participants):
                 if i < last_index:
                     st.divider()
 
-    with tab_diary:
-        if not activity_entries:
-            st.info("No daily entries logged yet for this provider.")
+    with tab_daily:
+        combined = sorted(activity_entries + reflection_entries, key=lambda r: r.get("Date") or "")
+        if not combined:
+            st.info("No daily entries or weekly reflections logged yet for this provider.")
         else:
-            st.caption(f"{len(activity_entries)} daily entries")
+            st.caption(f"{len(activity_entries)} daily entries · {len(reflection_entries)} weekly reflections")
             render_entries_table(
-                activity_entries,
+                combined,
                 columns=[
                     ("Date", "Date", "100px"),
                     ("Question", "Question", "220px"),
                     ("Description", "Description", None),
                 ],
             )
-
-    with tab_reflections:
-        st.caption(f"{len(reflection_entries)} weekly reflections")
-        if not reflection_entries:
-            st.info(
-                "No weekly reflections logged yet for this provider. These will appear here once "
-                "loaded into MyInsights and synced to the Entries tab."
-            )
-        else:
-            for row in reflection_entries:
-                with st.container(border=True):
-                    label = row.get("Week #")
-                    render_title(f"Week {label}" if label not in (None, "") else "Weekly reflection")
-                    for field, value in row.items():
-                        key = field.strip().lower()
-                        if key in CORE_FIELDS or not value:
-                            continue
-                        st.caption(f"**{field}:** {value}")
 
 
 # ---------------- ROUTER ----------------
