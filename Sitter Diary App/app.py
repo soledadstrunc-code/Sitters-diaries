@@ -13,7 +13,7 @@ from google.oauth2.service_account import Credentials
 from googleapiclient.discovery import build
 from googleapiclient.http import MediaIoBaseDownload
 
-st.set_page_config(page_title="Provider Lifecycle Study — Sitter Profiles", layout="wide")
+st.set_page_config(page_title="Provider Lifecycle | Research Study | 2026", layout="wide")
 
 SEGMENT_LABELS = {
     "M": "MID", "T": "TOP", "N": "NEW", "P": "TOP",
@@ -45,6 +45,7 @@ CORE_FIELDS = {"date", "user name", "segment", "week #"}
 # rows are actually present in each participant's own Coding sheet.
 
 KICKOFF_DIR = Path(__file__).resolve().parent.parent / "Kick off interviews"
+ANALYSIS_DIR = Path(__file__).resolve().parent.parent / "Analysis"
 # Locally (Drive-synced Mac folder), this exists and everything below reads from
 # disk. On Streamlit Cloud, nothing gets uploaded to GitHub for this anymore — it
 # doesn't exist there, so every loader below falls back to reading the same data
@@ -369,6 +370,90 @@ def load_journey_map():
     return {"stages": stages, "cross_cutting": cross_cutting}
 
 
+# ---------------- INTERVIEW FINDINGS (Analysis/*.xlsx) ----------------
+# Each segment's synthesized findings live in their own workbook inside the
+# "Analysis" folder (a sibling of "Kick off interviews"), one sheet with two
+# columns: Section, Content. Filenames aren't hardcoded to one exact string —
+# matched by keyword so "Pros interviews findings.xlsx", "Pro interviews
+# findings.xlsx", etc. all resolve the same way, and Mid/New versions just
+# need a file containing their segment keyword to start working with zero
+# code changes.
+FINDINGS_SEGMENT_KEYWORDS = {
+    "pro": "pro",
+    "mid": "mid",
+    "new": "new",
+}
+
+
+def _find_findings_workbook(segment_keyword):
+    if not ANALYSIS_DIR.exists():
+        return None
+    for path in sorted(ANALYSIS_DIR.glob("*.xlsx")):
+        name = path.name.lower()
+        if "interview" in name and "finding" in name and segment_keyword in name:
+            return path
+    return None
+
+
+def _rich_text_to_html(value):
+    """openpyxl only preserves per-character formatting (bold/italic runs
+    within one cell) when the workbook is opened with rich_text=True — a plain
+    load flattens everything to one unformatted string, which is why bold
+    words in the spreadsheet weren't showing up. This walks the rich-text
+    blocks and re-wraps any bold/italic runs in HTML tags; plain strings pass
+    through escaped as-is. Safe to render straight into st.markdown(...,
+    unsafe_allow_html=True) afterwards.
+
+    Newlines are converted to <br> here rather than left as literal '\\n' +
+    a CSS white-space:pre-wrap wrapper: a wrapping <div> containing a raw
+    blank line (a paragraph break is two consecutive '\\n's) makes Streamlit's
+    Markdown parser end the raw-HTML block early at that blank line, so
+    everything after the first paragraph break was silently dropped out of
+    the div and re-parsed as plain Markdown — collapsing the line breaks
+    within each later paragraph into one run-on line. Using <br> avoids the
+    blank-line trap entirely since no literal newline reaches the parser."""
+    if isinstance(value, str):
+        text = html.escape(value, quote=False)
+    else:
+        parts = []
+        for block in value:
+            if isinstance(block, str):
+                parts.append(html.escape(block, quote=False))
+                continue
+            block_text = html.escape(block.text, quote=False)
+            font = block.font
+            if font and font.b:
+                block_text = f"<b>{block_text}</b>"
+            if font and font.i:
+                block_text = f"<i>{block_text}</i>"
+            parts.append(block_text)
+        text = "".join(parts)
+    return text.replace("\n", "<br>")
+
+
+@st.cache_data(ttl=300, show_spinner=False)
+def load_interview_findings(segment_keyword):
+    """Reads the Section/Content rows from that segment's findings workbook in
+    the local 'Analysis' folder. Returns an ordered list of (section, content)
+    tuples, or None if no matching workbook exists yet for this segment.
+    Content is HTML with bold/italic runs from the spreadsheet preserved (see
+    _rich_text_to_html) — render it with unsafe_allow_html=True, not escaped
+    again."""
+    path = _find_findings_workbook(segment_keyword)
+    if not path:
+        return None
+    wb = openpyxl.load_workbook(path, rich_text=True)
+    ws = wb[wb.sheetnames[0]]
+    sections = []
+    for row in ws.iter_rows(min_row=2, values_only=True):
+        if not row or not row[0]:
+            continue
+        section = str(row[0]).strip()
+        content = _rich_text_to_html(row[1]).strip() if len(row) > 1 and row[1] else ""
+        sections.append((section, content))
+    return sections or None
+
+
 # ---------------- AUTH ----------------
 def check_login(email, password):
     auth_cfg = st.secrets.get("auth", {})
@@ -384,7 +469,7 @@ def check_login(email, password):
 
 
 def render_login():
-    st.title("Provider Lifecycle Study — Sitter Profiles")
+    st.title("🐶 Provider Lifecycle | Research Study | 2026")
     st.caption("Sign in with your Rover email to view the diary study dashboard.")
     with st.form("login_form"):
         email = st.text_input("Email", placeholder="you@rover.com")
@@ -954,18 +1039,146 @@ def go_to_dash():
 
 # ---------------- DASHBOARD VIEW ----------------
 def render_dashboard(participants):
-    st.title("Provider Lifecycle Study — Sitter Profiles")
+    st.title("🐶 Provider Lifecycle | Research Study | 2026")
 
-    tab_profiles, tab_patterns = st.tabs(["User Profiles", "User Patterns"])
+    # Top-level tabs (User Profiles / Interview findings) are styled a touch
+    # bigger than the Pro/Mid/New sub-tabs below them (see the matching CSS
+    # in render_interview_findings_tab), so the two levels of navigation read
+    # as a hierarchy instead of looking like two rows of equal tabs.
+    st.markdown(
+        """
+        <style>
+        .st-key-main_tabs [data-baseweb="tab"] p {
+            font-size: 1.05rem !important;
+            font-weight: 400 !important;
+        }
+        </style>
+        """,
+        unsafe_allow_html=True,
+    )
+    with st.container(key="main_tabs"):
+        tab_profiles, tab_findings = st.tabs(["User Profiles", "Interview findings"])
 
-    with tab_profiles:
-        render_user_profiles_tab(participants)
+        with tab_profiles:
+            render_user_profiles_tab(participants)
 
-    with tab_patterns:
-        # Journey map hidden for now (render_user_patterns_tab still has the full
-        # implementation below — just not called — so it's a one-line change to
-        # bring back).
-        st.info("Coming soon — this tab will surface cross-participant patterns and themes.")
+        with tab_findings:
+            render_interview_findings_tab()
+
+
+def render_interview_findings_tab():
+    # Journey map hidden for now (render_user_patterns_tab still has the full
+    # implementation above — just not called — so it's a one-line change to
+    # bring back under one of these sub-tabs later if needed).
+    st.markdown(
+        """
+        <style>
+        .st-key-findings_subtabs [data-baseweb="tab"] p {
+            font-size: 0.95rem !important;
+            font-weight: 400 !important;
+            color: #6B7280 !important;
+        }
+        .st-key-findings_subtabs [data-baseweb="tab"][aria-selected="true"] p {
+            color: #0AA35C !important;
+            font-weight: 600 !important;
+        }
+        </style>
+        """,
+        unsafe_allow_html=True,
+    )
+    with st.container(key="findings_subtabs"):
+        sub_pro, sub_mid, sub_new = st.tabs(["Pro providers", "Mid providers", "New providers"])
+        with sub_pro:
+            render_findings_section("pro", "findings_selected_pro")
+        with sub_mid:
+            render_findings_section("mid", "findings_selected_mid")
+        with sub_new:
+            render_findings_section("new", "findings_selected_new")
+
+
+def _slug(text):
+    """CSS-safe key fragment for a section name (used to scope button
+    highlight styles to one specific section's container)."""
+    return re.sub(r"[^a-zA-Z0-9_-]+", "-", text).strip("-").lower()
+
+
+def render_findings_placeholder(segment_keyword):
+    """Empty-state box for a segment with no findings workbook yet — styled
+    green (same family as the section-list buttons) rather than Streamlit's
+    default st.info blue or st.warning/st.error red, so every placeholder in
+    this tab reads as one consistent, calm color instead of mixed alert
+    colors."""
+    st.markdown(
+        f'<div style="background-color:#EAF7EF; border:1px solid #0AA35C; '
+        f'border-radius:6px; padding:12px 16px; color:#0B6B3A;">'
+        f"No interview findings uploaded yet for {segment_keyword.title()} providers. "
+        f'Add a workbook to the "Analysis" folder with "{segment_keyword}", "interview" '
+        f'and "finding" in its filename (e.g. "{segment_keyword.title()}s interviews '
+        f'findings.xlsx") and it will show here.'
+        f"</div>",
+        unsafe_allow_html=True,
+    )
+
+
+def render_findings_section(segment_keyword, state_key):
+    try:
+        sections = load_interview_findings(segment_keyword)
+    except Exception:
+        sections = None
+
+    if not sections:
+        render_findings_placeholder(segment_keyword)
+        return
+
+    if state_key not in st.session_state or st.session_state[state_key] not in {s for s, _ in sections}:
+        st.session_state[state_key] = sections[0][0]
+
+    # Each section gets its own keyed container so the green highlight can be
+    # scoped to just the selected one via CSS, instead of coloring every
+    # button in the list (or every button in the app).
+    # NOTE: approximate Rover green — I don't have a verified exact brand hex,
+    # swap ROVER_GREEN below for the real one if this isn't quite right.
+    ROVER_GREEN = "#0AA35C"
+    ROVER_GREEN_DARK = "#088B4D"
+    active_wrap_key = f"{state_key}-{_slug(st.session_state[state_key])}-wrap"
+    st.markdown(
+        f"""
+        <style>
+        .st-key-{active_wrap_key} button {{
+            background-color: {ROVER_GREEN} !important;
+            color: white !important;
+            border: 1px solid {ROVER_GREEN} !important;
+        }}
+        .st-key-{active_wrap_key} button:hover {{
+            background-color: {ROVER_GREEN_DARK} !important;
+            border-color: {ROVER_GREEN_DARK} !important;
+            color: white !important;
+        }}
+        .st-key-{active_wrap_key} button p {{
+            color: white !important;
+        }}
+        </style>
+        """,
+        unsafe_allow_html=True,
+    )
+
+    list_col, content_col = st.columns([1, 3], gap="large")
+
+    with list_col:
+        for section, _ in sections:
+            wrap_key = f"{state_key}-{_slug(section)}-wrap"
+            with st.container(key=wrap_key):
+                if st.button(section, key=f"{state_key}_{section}", use_container_width=True):
+                    st.session_state[state_key] = section
+                    st.rerun()
+
+    with content_col:
+        selected = st.session_state[state_key]
+        content = next((c for s, c in sections if s == selected), "")
+        st.markdown(
+            f'<div style="line-height:1.6;">{gray_quotes(content)}</div>',
+            unsafe_allow_html=True,
+        )
 
 
 def render_user_patterns_tab():
@@ -1024,11 +1237,6 @@ def render_user_patterns_tab():
 
 
 def render_user_profiles_tab(participants):
-    st.caption(
-        "Data refreshes automatically from Rover_Diary_Study_Tool (fed from MyInsights). "
-        "Select a provider to see their kickoff background, weekly reflections, and daily entries."
-    )
-
     collisions = _detect_roster_name_collisions()
     if collisions:
         details = "; ".join(
