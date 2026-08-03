@@ -395,6 +395,42 @@ def _find_findings_workbook(segment_keyword):
     return None
 
 
+@st.cache_data(ttl=300, show_spinner=False)
+def _list_drive_analysis_files():
+    """All files directly under the 'Analysis' Drive folder (secrets:
+    drive.analysis_folder_id). Returns [] if that secret isn't set — this is
+    the Drive equivalent of ANALYSIS_DIR, used when 'Analysis' doesn't exist
+    locally (i.e. on Streamlit Cloud, where nothing gets uploaded to GitHub
+    for this — updating a findings workbook in Drive is all it takes)."""
+    root_folder_id = st.secrets.get("drive", {}).get("analysis_folder_id")
+    if not root_folder_id:
+        return []
+    service = get_drive_service()
+    query = f"'{root_folder_id}' in parents and trashed = false"
+    files, page_token = [], None
+    while True:
+        resp = service.files().list(
+            q=query, fields="nextPageToken, files(id, name, mimeType)", pageToken=page_token
+        ).execute()
+        files.extend(resp.get("files", []))
+        page_token = resp.get("nextPageToken")
+        if not page_token:
+            break
+    return files
+
+
+@st.cache_data(ttl=300, show_spinner=False)
+def _find_drive_findings_workbook_bytes(segment_keyword):
+    """Drive equivalent of _find_findings_workbook: same keyword matching
+    ("interview" + "finding" + segment_keyword in the filename), against files
+    living in the 'Analysis' Drive folder instead of a local disk path."""
+    for f in _list_drive_analysis_files():
+        name = f["name"].lower()
+        if "interview" in name and "finding" in name and segment_keyword in name:
+            return _download_drive_bytes(f["id"], f.get("mimeType", ""))
+    return None
+
+
 def _rich_text_to_html(value):
     """openpyxl only preserves per-character formatting (bold/italic runs
     within one cell) when the workbook is opened with rich_text=True — a plain
@@ -433,16 +469,23 @@ def _rich_text_to_html(value):
 
 @st.cache_data(ttl=300, show_spinner=False)
 def load_interview_findings(segment_keyword):
-    """Reads the Section/Content rows from that segment's findings workbook in
-    the local 'Analysis' folder. Returns an ordered list of (section, content)
-    tuples, or None if no matching workbook exists yet for this segment.
-    Content is HTML with bold/italic runs from the spreadsheet preserved (see
-    _rich_text_to_html) — render it with unsafe_allow_html=True, not escaped
-    again."""
+    """Reads the Section/Content rows from that segment's findings workbook.
+    Returns an ordered list of (section, content) tuples, or None if no
+    matching workbook exists yet for this segment. Content is HTML with
+    bold/italic runs from the spreadsheet preserved (see _rich_text_to_html)
+    — render it with unsafe_allow_html=True, not escaped again. Reads the
+    local 'Analysis' folder when it exists on disk, else falls back to the
+    same keyword-matched file live from the 'Analysis' Drive folder (secrets:
+    drive.analysis_folder_id) — same local-first pattern as everything else
+    in this app, so nothing needs to be uploaded to GitHub for this to work."""
     path = _find_findings_workbook(segment_keyword)
-    if not path:
-        return None
-    wb = openpyxl.load_workbook(path, rich_text=True)
+    if path:
+        wb = openpyxl.load_workbook(path, rich_text=True)
+    else:
+        data = _find_drive_findings_workbook_bytes(segment_keyword)
+        if not data:
+            return None
+        wb = openpyxl.load_workbook(io.BytesIO(data), rich_text=True)
     ws = wb[wb.sheetnames[0]]
     sections = []
     for row in ws.iter_rows(min_row=2, values_only=True):
@@ -1265,6 +1308,9 @@ def render_user_profiles_tab(participants):
             _find_drive_coded_workbook_bytes.clear()
             _find_drive_file_bytes_by_name.clear()
             get_provider_description.clear()
+            load_interview_findings.clear()
+            _list_drive_analysis_files.clear()
+            _find_drive_findings_workbook_bytes.clear()
             st.rerun()
 
     st.markdown("**Filter by segment**")
