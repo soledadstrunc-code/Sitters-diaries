@@ -1,0 +1,8 @@
+[theme]
+# Streamlit's default accent color is red (#FF4B4B) — used for the active
+# tab underline, radio/checkbox selection, sliders, links, and any button
+# with type="primary". Overriding it here switches all of that to green,
+# app-wide, instead of patching each red instance with custom CSS.
+# NOTE: approximate Rover green — swap this for the exact brand hex if you
+# have it (e.g. from Figma/brand guidelines).
+primaryColor = "#0AA35C"
