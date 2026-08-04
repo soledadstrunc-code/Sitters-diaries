@@ -1082,7 +1082,28 @@ def go_to_dash():
 
 # ---------------- DASHBOARD VIEW ----------------
 def render_dashboard(participants):
-    st.title("🐶 Provider Lifecycle | Research Study | 2026")
+    title_col, refresh_col = st.columns([5, 1])
+    with title_col:
+        st.title("🐶 Provider Lifecycle | Research Study | 2026")
+    with refresh_col:
+        # Nudges the button down to roughly align with the title's baseline
+        # instead of sitting flush at the top of a much taller row.
+        st.markdown("<div style='margin-top:28px;'></div>", unsafe_allow_html=True)
+        if st.button("Refresh data", use_container_width=True):
+            load_entries.clear()
+            load_user_roster.clear()
+            _detect_roster_name_collisions.clear()
+            load_coded_interview.clear()
+            load_snapshot.clear()
+            load_journey_map.clear()
+            _list_drive_provider_folders.clear()
+            _find_drive_coded_workbook_bytes.clear()
+            _find_drive_file_bytes_by_name.clear()
+            get_provider_description.clear()
+            load_interview_findings.clear()
+            _list_drive_analysis_files.clear()
+            _find_drive_findings_workbook_bytes.clear()
+            st.rerun()
 
     # Top-level tabs (User Profiles / Interview findings) are styled a touch
     # bigger than the Pro/Mid/New sub-tabs below them (see the matching CSS
@@ -1292,26 +1313,6 @@ def render_user_profiles_tab(participants):
             f"case can't be told apart automatically; rename one folder to a more specific name "
             f"so they're distinguishable."
         )
-
-    top_col1, top_col2 = st.columns([5, 1])
-    with top_col1:
-        st.write("")
-    with top_col2:
-        if st.button("Refresh data", use_container_width=True):
-            load_entries.clear()
-            load_user_roster.clear()
-            _detect_roster_name_collisions.clear()
-            load_coded_interview.clear()
-            load_snapshot.clear()
-            load_journey_map.clear()
-            _list_drive_provider_folders.clear()
-            _find_drive_coded_workbook_bytes.clear()
-            _find_drive_file_bytes_by_name.clear()
-            get_provider_description.clear()
-            load_interview_findings.clear()
-            _list_drive_analysis_files.clear()
-            _find_drive_findings_workbook_bytes.clear()
-            st.rerun()
 
     st.markdown("**Filter by segment**")
     seg_filter_labels = {"ALL": "All", "NEW": "New", "MID": "Mid", "TOP": "Pro"}
