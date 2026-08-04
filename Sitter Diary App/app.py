@@ -371,26 +371,29 @@ def load_journey_map():
 
 
 # ---------------- INTERVIEW FINDINGS (Analysis/*.xlsx) ----------------
-# Each segment's synthesized findings live in their own workbook inside the
-# "Analysis" folder (a sibling of "Kick off interviews"), one sheet with two
-# columns: Section, Content. Filenames aren't hardcoded to one exact string —
-# matched by keyword so "Pros interviews findings.xlsx", "Pro interviews
-# findings.xlsx", etc. all resolve the same way, and Mid/New versions just
-# need a file containing their segment keyword to start working with zero
-# code changes.
-FINDINGS_SEGMENT_KEYWORDS = {
-    "pro": "pro",
-    "mid": "mid",
-    "new": "new",
+# Each segment's (and the cross-segment) synthesized findings live in their
+# own workbook inside the "Analysis" folder (a sibling of "Kick off
+# interviews"), one sheet with two columns: Section, Content. Filenames
+# aren't hardcoded to one exact string — matched by a set of required
+# keywords, all of which must appear (case-insensitively) somewhere in the
+# filename, so "Pros interviews findings.xlsx", "Pro interviews
+# findings.xlsx", etc. all resolve the same way. Adding a new segment (or a
+# new cross-segment-style workbook) just needs a filename containing its
+# keywords — zero code changes.
+FINDINGS_KEYWORDS = {
+    "pro": ("interview", "finding", "pro"),
+    "mid": ("interview", "finding", "mid"),
+    "new": ("interview", "finding", "new"),
+    "cross": ("cross", "segment"),
 }
 
 
-def _find_findings_workbook(segment_keyword):
+def _find_findings_workbook(required_keywords):
     if not ANALYSIS_DIR.exists():
         return None
     for path in sorted(ANALYSIS_DIR.glob("*.xlsx")):
         name = path.name.lower()
-        if "interview" in name and "finding" in name and segment_keyword in name:
+        if all(kw in name for kw in required_keywords):
             return path
     return None
 
@@ -420,13 +423,13 @@ def _list_drive_analysis_files():
 
 
 @st.cache_data(ttl=300, show_spinner=False)
-def _find_drive_findings_workbook_bytes(segment_keyword):
-    """Drive equivalent of _find_findings_workbook: same keyword matching
-    ("interview" + "finding" + segment_keyword in the filename), against files
-    living in the 'Analysis' Drive folder instead of a local disk path."""
+def _find_drive_findings_workbook_bytes(required_keywords):
+    """Drive equivalent of _find_findings_workbook: same all-keywords-must-
+    match filename logic, against files living in the 'Analysis' Drive folder
+    instead of a local disk path."""
     for f in _list_drive_analysis_files():
         name = f["name"].lower()
-        if "interview" in name and "finding" in name and segment_keyword in name:
+        if all(kw in name for kw in required_keywords):
             return _download_drive_bytes(f["id"], f.get("mimeType", ""))
     return None
 
@@ -468,21 +471,23 @@ def _rich_text_to_html(value):
 
 
 @st.cache_data(ttl=300, show_spinner=False)
-def load_interview_findings(segment_keyword):
-    """Reads the Section/Content rows from that segment's findings workbook.
+def load_interview_findings(required_keywords):
+    """Reads the Section/Content rows from the findings workbook whose
+    filename contains every keyword in `required_keywords` (see
+    FINDINGS_KEYWORDS) — pass a tuple, not a list, so this stays cacheable.
     Returns an ordered list of (section, content) tuples, or None if no
-    matching workbook exists yet for this segment. Content is HTML with
-    bold/italic runs from the spreadsheet preserved (see _rich_text_to_html)
-    — render it with unsafe_allow_html=True, not escaped again. Reads the
-    local 'Analysis' folder when it exists on disk, else falls back to the
-    same keyword-matched file live from the 'Analysis' Drive folder (secrets:
-    drive.analysis_folder_id) — same local-first pattern as everything else
-    in this app, so nothing needs to be uploaded to GitHub for this to work."""
-    path = _find_findings_workbook(segment_keyword)
+    matching workbook exists yet. Content is HTML with bold/italic runs from
+    the spreadsheet preserved (see _rich_text_to_html) — render it with
+    unsafe_allow_html=True, not escaped again. Reads the local 'Analysis'
+    folder when it exists on disk, else falls back to the same keyword-matched
+    file live from the 'Analysis' Drive folder (secrets: drive.analysis_folder_id)
+    — same local-first pattern as everything else in this app, so nothing
+    needs to be uploaded to GitHub for this to work."""
+    path = _find_findings_workbook(required_keywords)
     if path:
         wb = openpyxl.load_workbook(path, rich_text=True)
     else:
-        data = _find_drive_findings_workbook_bytes(segment_keyword)
+        data = _find_drive_findings_workbook_bytes(required_keywords)
         if not data:
             return None
         wb = openpyxl.load_workbook(io.BytesIO(data), rich_text=True)
@@ -1151,13 +1156,19 @@ def render_interview_findings_tab():
         unsafe_allow_html=True,
     )
     with st.container(key="findings_subtabs"):
-        sub_pro, sub_mid, sub_new = st.tabs(["Pro providers", "Mid providers", "New providers"])
+        sub_cross, sub_pro, sub_mid, sub_new = st.tabs(
+            ["Cross-Segment Comparison", "Pro providers", "Mid providers", "New providers"]
+        )
+        with sub_cross:
+            render_findings_section(
+                FINDINGS_KEYWORDS["cross"], "findings_selected_cross", "Cross-Segment Comparison"
+            )
         with sub_pro:
-            render_findings_section("pro", "findings_selected_pro")
+            render_findings_section(FINDINGS_KEYWORDS["pro"], "findings_selected_pro", "Pro")
         with sub_mid:
-            render_findings_section("mid", "findings_selected_mid")
+            render_findings_section(FINDINGS_KEYWORDS["mid"], "findings_selected_mid", "Mid")
         with sub_new:
-            render_findings_section("new", "findings_selected_new")
+            render_findings_section(FINDINGS_KEYWORDS["new"], "findings_selected_new", "New")
 
 
 def _slug(text):
@@ -1166,32 +1177,32 @@ def _slug(text):
     return re.sub(r"[^a-zA-Z0-9_-]+", "-", text).strip("-").lower()
 
 
-def render_findings_placeholder(segment_keyword):
-    """Empty-state box for a segment with no findings workbook yet — styled
-    green (same family as the section-list buttons) rather than Streamlit's
-    default st.info blue or st.warning/st.error red, so every placeholder in
-    this tab reads as one consistent, calm color instead of mixed alert
-    colors."""
+def render_findings_placeholder(required_keywords, label):
+    """Empty-state box for a section with no matching findings workbook yet
+    — styled green (same family as the section-list buttons) rather than
+    Streamlit's default st.info blue or st.warning/st.error red, so every
+    placeholder in this tab reads as one consistent, calm color instead of
+    mixed alert colors."""
+    keywords_str = ", ".join(f'"{kw}"' for kw in required_keywords)
     st.markdown(
         f'<div style="background-color:#EAF7EF; border:1px solid #0AA35C; '
         f'border-radius:6px; padding:12px 16px; color:#0B6B3A;">'
-        f"No interview findings uploaded yet for {segment_keyword.title()} providers. "
-        f'Add a workbook to the "Analysis" folder with "{segment_keyword}", "interview" '
-        f'and "finding" in its filename (e.g. "{segment_keyword.title()}s interviews '
-        f'findings.xlsx") and it will show here.'
+        f"No interview findings uploaded yet for {label}. "
+        f'Add a workbook to the "Analysis" folder with {keywords_str} all somewhere '
+        f'in its filename and it will show here.'
         f"</div>",
         unsafe_allow_html=True,
     )
 
 
-def render_findings_section(segment_keyword, state_key):
+def render_findings_section(required_keywords, state_key, label):
     try:
-        sections = load_interview_findings(segment_keyword)
+        sections = load_interview_findings(required_keywords)
     except Exception:
         sections = None
 
     if not sections:
-        render_findings_placeholder(segment_keyword)
+        render_findings_placeholder(required_keywords, label)
         return
 
     if state_key not in st.session_state or st.session_state[state_key] not in {s for s, _ in sections}:
