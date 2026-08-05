@@ -467,7 +467,18 @@ def _rich_text_to_html(value):
                 block_text = f"<i>{block_text}</i>"
             parts.append(block_text)
         text = "".join(parts)
-    return _convert_pipe_tables_to_html(text.replace("\n", "<br>"))
+    html_text = text.replace("\n", "<br>")
+    # A bold/italic run whose text ends in a newline (e.g. a bold heading
+    # line right before a table) produces '...<br></b>' — the closing tag
+    # landing AFTER the line break instead of before it, since the newline
+    # was part of that formatted run. Visually this renders identically
+    # either way (a <br> carries no content for the tag to wrap), but it
+    # corrupts line-based parsing done later (_convert_pipe_tables_to_html
+    # splits on <br> to find table rows, and a stray '</b>' glued onto the
+    # start of what should be a clean table row broke its column count).
+    # Moving any closing tag(s) to before the <br> instead fixes that.
+    html_text = re.sub(r'<br>((?:</[bi]>)+)', r'\1<br>', html_text)
+    return _convert_pipe_tables_to_html(html_text)
 
 
 _MD_SEPARATOR_CELL_RE = re.compile(r'^:?-{3,}:?$')
@@ -554,21 +565,31 @@ def _convert_pipe_tables_to_html(html_text):
 
 
 def _render_pipe_table(rows):
+    """Clean comparison-table style: bold header row and bold first column
+    (row labels), thin light-gray row dividers, no vertical/boxed borders,
+    generous padding — matches the plain black/gray look requested, not the
+    app's green accent (that's reserved for the section-list buttons)."""
     header_cells = [_md_bold_to_html(c.strip()) for c in _strip_outer_pipe(rows[0]).split("|")]
     thead = "".join(
-        f'<th style="text-align:left;padding:6px 14px;border-bottom:2px solid #0AA35C;'
-        f'white-space:nowrap;">{c}</th>'
+        f'<th style="text-align:left;padding:10px 24px 12px 0;'
+        f'border-bottom:1px solid #E5E7EB;font-weight:700;">{c}</th>'
         for c in header_cells
     )
     tbody = ""
     for r in rows[1:]:
-        cells = "".join(
-            f'<td style="padding:6px 14px;border-bottom:1px solid #E5E7EB;">{_md_bold_to_html(c.strip())}</td>'
-            for c in _strip_outer_pipe(r).split("|")
-        )
+        cells_list = _strip_outer_pipe(r).split("|")
+        cells = ""
+        for idx, c in enumerate(cells_list):
+            cell_html = _md_bold_to_html(c.strip())
+            weight = "font-weight:700;" if idx == 0 else ""
+            cells += (
+                f'<td style="padding:14px 24px 14px 0;border-bottom:1px solid #E5E7EB;'
+                f'vertical-align:top;{weight}">{cell_html}</td>'
+            )
         tbody += f"<tr>{cells}</tr>"
     return (
-        '<table style="border-collapse:collapse;margin:10px 0;font-size:0.95rem;">'
+        '<table style="border-collapse:collapse;margin:12px 0;font-size:0.95rem;'
+        'line-height:1.5;width:100%;">'
         f"<thead><tr>{thead}</tr></thead><tbody>{tbody}</tbody></table>"
     )
 
