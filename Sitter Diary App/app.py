@@ -1527,11 +1527,6 @@ def render_profile(participants):
         description = None
     if description:
         st.write(description)
-    else:
-        st.caption(
-            "No description yet — add a Google Doc to this provider's folder inside "
-            "\"Kick off interviews\" in Drive and it will show up here."
-        )
 
     entries = p["entries"]
     reflection_entries = [r for r in entries if classify_entry(r) == "reflection"]
