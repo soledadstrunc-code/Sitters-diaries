@@ -168,13 +168,15 @@ def gray_quotes(text):
 def split_into_lines(text):
     """Coded summaries are either a bullet list (points separated by '•', with
     embedded newlines that Markdown collapses instead of rendering as line breaks)
-    or a single run-on paragraph. This splits on bullets when present, otherwise on
-    sentence-ending periods, so each point/sentence gets its own line rather than
-    running together in one block."""
+    or free-form text. This splits on bullets when present; otherwise it only
+    breaks lines where the coder actually typed a manual line break (Enter) in
+    the spreadsheet cell — it no longer auto-splits after every sentence-ending
+    period, since that forced a new line after every '.' regardless of whether
+    one was wanted there."""
     if "•" in text:
         parts = [p.strip() for p in text.split("•") if p.strip()]
     else:
-        parts = [s.strip() for s in re.split(r'(?<=\.)\s+(?=[A-Z"“])', text) if s.strip()]
+        parts = [s.strip() for s in text.split("\n") if s.strip()]
     return parts or [text.strip()]
 
 
