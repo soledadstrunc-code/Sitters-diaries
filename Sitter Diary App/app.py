@@ -467,7 +467,110 @@ def _rich_text_to_html(value):
                 block_text = f"<i>{block_text}</i>"
             parts.append(block_text)
         text = "".join(parts)
-    return text.replace("\n", "<br>")
+    return _convert_pipe_tables_to_html(text.replace("\n", "<br>"))
+
+
+_MD_SEPARATOR_CELL_RE = re.compile(r'^:?-{3,}:?$')
+_MD_BOLD_RE = re.compile(r'\*\*(.+?)\*\*')
+
+
+def _strip_outer_pipe(line):
+    """Standard Markdown tables (e.g. pasted from a doc or written by an AI
+    tool) wrap every row in leading/trailing '|', like '| A | B |' — strip
+    those so column-splitting lines up whether a row is written that way or
+    as plain 'A | B'."""
+    s = line.strip()
+    if s.startswith("|"):
+        s = s[1:]
+    if s.endswith("|"):
+        s = s[:-1]
+    return s
+
+
+def _is_md_separator_row(cells):
+    """Markdown's header-divider row, e.g. '---|---|---' or ':--|:-:|--:' —
+    present in tables pasted from Markdown, not something to render as data."""
+    stripped = [c.strip() for c in cells]
+    return any(stripped) and all(_MD_SEPARATOR_CELL_RE.match(c) for c in stripped if c)
+
+
+def _md_bold_to_html(text):
+    """Cell text may contain literal Markdown '**bold**' (typed by hand, or
+    pasted from a Markdown table) rather than real spreadsheet rich-text
+    formatting — converts it to an actual <b> tag."""
+    return _MD_BOLD_RE.sub(r"<b>\1</b>", text)
+
+
+def _convert_pipe_tables_to_html(html_text):
+    """Lets you add a real comparison table inside a Content cell just by
+    typing plain text — no spreadsheet table feature needed, and no need to
+    reformat a table you already wrote elsewhere. Within one cell, start a
+    new line for each table row (Option+Return on Mac / Alt+Enter on Windows,
+    same as any multi-line cell), separating columns with "|". Both of these
+    work:
+
+        Dimension | Pro | Mid | New
+        Repeat clients | High | Medium | Low
+
+    or standard Markdown style (leading/trailing '|', a '---' divider row
+    under the header, '**bold**' cells):
+
+        | Dimension | Pro | Mid | New |
+        | --- | --- | --- | --- |
+        | **Repeat clients** | High | Medium | Low |
+
+    Any block of 2+ consecutive data lines with the same column count is
+    rendered as an HTML table, with the first line as the header row (a
+    Markdown divider row right after it, if present, is dropped rather than
+    shown as data). Text outside such a block is left untouched."""
+    lines = html_text.split("<br>")
+    out = []
+    i = 0
+    while i < len(lines):
+        line = lines[i]
+        if "|" in line and line.strip():
+            col_count = len(_strip_outer_pipe(line).split("|"))
+            block = [line]
+            j = i + 1
+            while j < len(lines) and "|" in lines[j] and lines[j].strip():
+                candidate_cells = _strip_outer_pipe(lines[j]).split("|")
+                if len(candidate_cells) != col_count:
+                    break
+                block.append(lines[j])
+                j += 1
+            # Drop a Markdown divider row (e.g. '---|---|---') if present —
+            # it's formatting, not a real data row.
+            data_rows = [
+                r for r in block
+                if not _is_md_separator_row(_strip_outer_pipe(r).split("|"))
+            ]
+            if len(data_rows) >= 2:
+                out.append(_render_pipe_table(data_rows))
+                i = j
+                continue
+        out.append(line)
+        i += 1
+    return "<br>".join(out)
+
+
+def _render_pipe_table(rows):
+    header_cells = [_md_bold_to_html(c.strip()) for c in _strip_outer_pipe(rows[0]).split("|")]
+    thead = "".join(
+        f'<th style="text-align:left;padding:6px 14px;border-bottom:2px solid #0AA35C;'
+        f'white-space:nowrap;">{c}</th>'
+        for c in header_cells
+    )
+    tbody = ""
+    for r in rows[1:]:
+        cells = "".join(
+            f'<td style="padding:6px 14px;border-bottom:1px solid #E5E7EB;">{_md_bold_to_html(c.strip())}</td>'
+            for c in _strip_outer_pipe(r).split("|")
+        )
+        tbody += f"<tr>{cells}</tr>"
+    return (
+        '<table style="border-collapse:collapse;margin:10px 0;font-size:0.95rem;">'
+        f"<thead><tr>{thead}</tr></thead><tbody>{tbody}</tbody></table>"
+    )
 
 
 @st.cache_data(ttl=300, show_spinner=False)
