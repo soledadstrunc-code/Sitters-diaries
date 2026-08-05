@@ -1213,13 +1213,9 @@ def go_to_dash():
 
 # ---------------- DASHBOARD VIEW ----------------
 def render_dashboard(participants):
-    title_col, refresh_col = st.columns([5, 1])
-    with title_col:
-        st.title("🐶 Provider Lifecycle | Discovery Research Study | 2026")
+    st.title("🐶 Provider Lifecycle | Discovery Research Study | 2026")
+    refresh_col, _ = st.columns([1, 5])
     with refresh_col:
-        # Nudges the button down to roughly align with the title's baseline
-        # instead of sitting flush at the top of a much taller row.
-        st.markdown("<div style='margin-top:28px;'></div>", unsafe_allow_html=True)
         if st.button("Refresh data", use_container_width=True):
             load_entries.clear()
             load_user_roster.clear()
