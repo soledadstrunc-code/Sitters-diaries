@@ -149,6 +149,13 @@ def load_snapshot(name, segment=None):
         if not row or not row[0]:
             continue
         field = str(row[0]).strip()
+        # Some coded workbooks have a literal "Field / Value / Supporting quote"
+        # header row at the top; others (rewritten/rebuilt tabs) start straight
+        # into real data with no header at all. Skipping only an actual header
+        # row (by its label, not by position) means both styles work without
+        # losing the first real field the way a fixed min_row did.
+        if field.lower() == "field":
+            continue
         value = row[1] if len(row) > 1 and row[1] else ""
         quote = row[2] if len(row) > 2 and row[2] else ""
         rows.append((field, str(value), str(quote)))
