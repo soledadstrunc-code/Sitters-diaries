@@ -145,7 +145,7 @@ def load_snapshot(name, segment=None):
         return None
 
     rows = []
-    for row in wb["Snapshot"].iter_rows(min_row=2, values_only=True):
+    for row in wb["Snapshot"].iter_rows(min_row=1, values_only=True):
         if not row or not row[0]:
             continue
         field = str(row[0]).strip()
