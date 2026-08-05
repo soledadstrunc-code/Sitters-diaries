@@ -13,7 +13,7 @@ from google.oauth2.service_account import Credentials
 from googleapiclient.discovery import build
 from googleapiclient.http import MediaIoBaseDownload
 
-st.set_page_config(page_title="Provider Lifecycle | Research Study | 2026", layout="wide")
+st.set_page_config(page_title="Provider Lifecycle | Discovery Research Study | 2026", layout="wide")
 
 SEGMENT_LABELS = {
     "M": "MID", "T": "TOP", "N": "NEW", "P": "TOP",
@@ -643,7 +643,7 @@ def check_login(email, password):
 
 
 def render_login():
-    st.title("🐶 Provider Lifecycle | Research Study | 2026")
+    st.title("🐶 Provider Lifecycle | Discovery Research Study | 2026")
     st.caption("Sign in with your Rover email to view the diary study dashboard.")
     with st.form("login_form"):
         email = st.text_input("Email", placeholder="you@rover.com")
@@ -1215,7 +1215,7 @@ def go_to_dash():
 def render_dashboard(participants):
     title_col, refresh_col = st.columns([5, 1])
     with title_col:
-        st.title("🐶 Provider Lifecycle | Research Study | 2026")
+        st.title("🐶 Provider Lifecycle | Discovery Research Study | 2026")
     with refresh_col:
         # Nudges the button down to roughly align with the title's baseline
         # instead of sitting flush at the top of a much taller row.
