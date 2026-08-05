@@ -173,18 +173,29 @@ def gray_quotes(text):
 
 
 def split_into_lines(text):
-    """Coded summaries are either a bullet list (points separated by '•', with
-    embedded newlines that Markdown collapses instead of rendering as line breaks)
-    or free-form text. This splits on bullets when present; otherwise it only
-    breaks lines where the coder actually typed a manual line break (Enter) in
-    the spreadsheet cell — it no longer auto-splits after every sentence-ending
-    period, since that forced a new line after every '.' regardless of whether
-    one was wanted there."""
+    """Coded summaries are either a bullet list (points separated by '•') or
+    free-form text. Splits on bullets when present; otherwise splits into
+    paragraphs on a blank line (two Enters in the cell) — each paragraph is
+    rendered as its own block later on. A single Enter within a paragraph is
+    NOT split here; render_text_block below turns those into soft line breaks
+    inside one block instead, since a single Enter used to get the same big
+    gap as a real paragraph break (every line was its own Streamlit block)."""
     if "•" in text:
         parts = [p.strip() for p in text.split("•") if p.strip()]
     else:
-        parts = [s.strip() for s in text.split("\n") if s.strip()]
+        parts = [p.strip() for p in re.split(r'\n\s*\n', text) if p.strip()]
     return parts or [text.strip()]
+
+
+def render_text_block(paragraph):
+    """Renders one paragraph from split_into_lines as a single Streamlit
+    markdown block. Any single Enters the coder typed inside this paragraph
+    become soft line breaks (Markdown's trailing-double-space convention)
+    within that one block, instead of each line getting its own block with a
+    large gap around it — that mismatch was why a single Enter looked like a
+    much bigger break than intended."""
+    soft_lines = [gray_quotes(line.strip()) for line in paragraph.split("\n") if line.strip()]
+    st.markdown("  \n".join(soft_lines))
 
 
 # Streamlit's default body text renders around 16px (~12pt); titles/labels below
@@ -1562,8 +1573,8 @@ def render_profile(participants):
             fields = [f for f in snapshot if f[0].strip().lower() != "provider segment"]
             for field, value, quote in fields:
                 render_title(field)
-                for line in split_into_lines(str(value)):
-                    st.markdown(gray_quotes(line))
+                for paragraph in split_into_lines(str(value)):
+                    render_text_block(paragraph)
 
     with tab_background:
         if not coded:
@@ -1580,8 +1591,8 @@ def render_profile(participants):
             last_index = len(coded["categories"]) - 1
             for i, (category, summary) in enumerate(coded["categories"]):
                 render_title(f"{category_emoji(category)} {category}")
-                for line in split_into_lines(summary):
-                    st.markdown(gray_quotes(line))
+                for paragraph in split_into_lines(summary):
+                    render_text_block(paragraph)
                 if i < last_index:
                     st.divider()
 
