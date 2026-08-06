@@ -1266,13 +1266,34 @@ def render_dashboard(participants):
         unsafe_allow_html=True,
     )
     with st.container(key="main_tabs"):
-        tab_profiles, tab_findings = st.tabs(["User Profiles", "Interview findings"])
+        tab_profiles, tab_findings, tab_personas = st.tabs(
+            ["User Profiles", "Interview findings", "Sitters personas"]
+        )
 
         with tab_profiles:
             render_user_profiles_tab(participants)
 
         with tab_findings:
             render_interview_findings_tab()
+
+        with tab_personas:
+            render_sitters_personas_tab()
+
+
+def render_sitters_personas_tab():
+    # Placeholder for now — same green empty-state style as the Interview
+    # findings placeholders, so it reads as "not wired up yet" rather than an
+    # error. Once there's a real source (e.g. a "Sitter personas.xlsx" in the
+    # Analysis folder, or a set of persona write-ups), this is where to load
+    # and render it.
+    st.markdown(
+        '<div style="background-color:#EAF7EF; border:1px solid #0AA35C; '
+        'border-radius:6px; padding:12px 16px; color:#0B6B3A;">'
+        "No sitter personas added yet. This tab will show the provider personas "
+        "once they're ready."
+        "</div>",
+        unsafe_allow_html=True,
+    )
 
 
 def render_interview_findings_tab():
