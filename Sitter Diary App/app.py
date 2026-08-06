@@ -405,6 +405,7 @@ FINDINGS_KEYWORDS = {
     "mid": ("interview", "finding", "mid"),
     "new": ("interview", "finding", "new"),
     "cross": ("cross", "segment"),
+    "strategy_check": ("providers", "strategy", "check"),
 }
 
 
@@ -1317,9 +1318,21 @@ def render_interview_findings_tab():
         unsafe_allow_html=True,
     )
     with st.container(key="findings_subtabs"):
-        sub_cross, sub_pro, sub_mid, sub_new = st.tabs(
-            ["Cross-Segment Comparison", "Pro providers", "Mid providers", "New providers"]
+        sub_strategy, sub_cross, sub_pro, sub_mid, sub_new = st.tabs(
+            [
+                "Providers Strategy Check",
+                "Cross-Segment Comparison",
+                "Pro providers",
+                "Mid providers",
+                "New providers",
+            ]
         )
+        with sub_strategy:
+            render_findings_section(
+                FINDINGS_KEYWORDS["strategy_check"],
+                "findings_selected_strategy_check",
+                "Providers Strategy Check",
+            )
         with sub_cross:
             render_findings_section(
                 FINDINGS_KEYWORDS["cross"], "findings_selected_cross", "Cross-Segment Comparison"
